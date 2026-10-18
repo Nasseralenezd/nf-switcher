@@ -44,6 +44,33 @@ pub fn main_page() -> Model {
     m
 }
 
+/// The README's picture: the main page without hover or update dot. The apps' real icons are used where they're
+/// installed on the PC that renders it (paths from the environment, so no user name ends up in the code).
+pub fn hero() -> Model {
+    let mut m = main_page();
+    m.hover = None;
+    m.update = None;
+    let env = |k: &str| std::env::var(k).unwrap_or_default();
+    let discord = std::fs::read_dir(format!(r"{}\Discord", env("LOCALAPPDATA")))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("Discord.exe"))
+        .find(|p| p.exists());
+    let real = [
+        Some(format!(r"{}\BraveSoftware\Brave-Browser\Application\brave.exe", env("LOCALAPPDATA")).into()),
+        Some(format!(r"{}\Spotify\Spotify.exe", env("APPDATA")).into()),
+        None,
+        discord,
+    ];
+    for (a, p) in m.apps.iter_mut().zip(real) {
+        if let Some(p) = p.filter(|p: &std::path::PathBuf| p.exists()) {
+            a.path = p.display().to_string();
+        }
+    }
+    m
+}
+
 pub fn wifi_down() -> Model {
     let mut m = main_page();
     m.status = "Wi-Fi down".into();
@@ -112,6 +139,7 @@ pub fn settings_page() -> Model {
 pub fn all() -> Vec<(&'static str, Model)> {
     vec![
         ("main", main_page()),
+        ("hero", hero()),
         ("wifi-down", wifi_down()),
         ("needs-admin", needs_admin()),
         ("add", add_page()),
