@@ -101,6 +101,24 @@ pub fn needs_admin() -> Model {
     m
 }
 
+/// Windows 11 before 24H2: the reason and the way out, and no UAC prompt (so not admin).
+pub fn too_old() -> Model {
+    let mut m = Model { status: "Not supported".into(), footer: "Not admin".into(), ..Default::default() };
+    tiles(&mut m);
+    m.wifi.on = false;
+    let this = crate::engine::ThisWindows { name: "Windows 11 23H2".into(), windows10: false, updatable: true };
+    m.banner = Some(crate::app::too_old_banner(Some(&this)));
+    m.apps = vec![AppItem {
+        name: "Brave".into(),
+        path: r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe".into(),
+        wifi: true,
+        status: "Needs Windows 11 24H2 or later".into(),
+        warn: true,
+    }];
+    m.hover = Some(Hit::BannerButton);
+    m
+}
+
 pub fn add_page() -> Model {
     let mut m = Model { page: Page::Add, running: 38, search: "ste".into(), search_focus: true, caret: true, ..Default::default() };
     m.picks = vec![
@@ -142,6 +160,7 @@ pub fn all() -> Vec<(&'static str, Model)> {
         ("hero", hero()),
         ("wifi-down", wifi_down()),
         ("needs-admin", needs_admin()),
+        ("too-old", too_old()),
         ("add", add_page()),
         ("settings", settings_page()),
     ]

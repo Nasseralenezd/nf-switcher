@@ -81,7 +81,8 @@ pub fn installed() -> Option<(PathBuf, String)> {
     Some((PathBuf::from(dir), ver))
 }
 
-fn reg_read(key: &str, name: &str) -> Option<String> {
+/// A text value under HKEY_LOCAL_MACHINE.
+pub(crate) fn reg_read(key: &str, name: &str) -> Option<String> {
     let mut buf = vec![0u16; 1024];
     let mut size = (buf.len() * 2) as u32;
     let r = unsafe {

@@ -19,6 +19,11 @@ fn has(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
 }
 
+/// Why a copy without admin can't pin, as the real start decides it: a too-old Windows, or just no admin.
+fn no_admin_reason() -> engine::EngineError {
+    if engine::supported() { engine::EngineError::NeedsAdmin } else { engine::EngineError::too_old() }
+}
+
 fn shots(dir: &std::path::Path) {
     let _ = std::fs::create_dir_all(dir);
     for (name, m) in ui::sample::all() {
@@ -53,7 +58,7 @@ fn smoke() -> i32 {
     std::env::set_var("NFSW_DATA_DIR", &dir);
     let _ = std::fs::create_dir_all(&dir);
     let t0 = std::time::Instant::now();
-    let mut app = app::App::new(false, Err(engine::EngineError::NeedsAdmin));
+    let mut app = app::App::new(false, Err(no_admin_reason()));
     let t_start = t0.elapsed().as_millis();
     let t1 = std::time::Instant::now();
     app.refresh_activity();
@@ -100,6 +105,8 @@ fn smoke() -> i32 {
         "apps_in_config": app.cfg.apps.len(),
         "heights": heights,
         "routepolicies_enabled": engine::routepolicies::read(),
+        "supported": engine::supported(),
+        "windows": engine::this_windows().map(|w| w.name),
         "ms": {"start": t_start, "activity": t_activity},
         "shots": shots_dir.display().to_string(),
         "errors": errors,
@@ -151,7 +158,7 @@ fn main() {
             cfg.set_route(&p, &procs::display_name(&p), route);
         }
         let _ = cfg.save();
-        let app = app::App::new(elevate::is_elevated(), Err(engine::EngineError::NeedsAdmin));
+        let app = app::App::new(elevate::is_elevated(), Err(no_admin_reason()));
         let opts = ui::window::Options {
             class: windows::core::w!("NFSwitcherFlyoutTest"),
             show: true,
@@ -177,7 +184,7 @@ fn main() {
         }
         std::env::set_var("NFSW_DATA_DIR", std::env::temp_dir().join("nf-switcher-smoke"));
         let secs = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(10u64);
-        let app = app::App::new(false, Err(engine::EngineError::NeedsAdmin));
+        let app = app::App::new(false, Err(no_admin_reason()));
         let opts = ui::window::Options {
             class: windows::core::w!("NFSwitcherFlyoutTest"),
             show: false,
@@ -206,7 +213,9 @@ fn main() {
         elevate::wake_other();
         return;
     }
-    if !elevate::is_elevated() && !has(&args, "--no-elevate") && !has(&args, "--elevated") {
+    // A Windows without connection policies can't pin anything with admin either: no UAC prompt, just the reason.
+    let supported = engine::supported();
+    if supported && !elevate::is_elevated() && !has(&args, "--no-elevate") && !has(&args, "--elevated") {
         let mut again = args.clone();
         again.push("--elevated".into());
         match elevate::relaunch_as_admin(&again) {
@@ -223,6 +232,7 @@ fn main() {
     let secured = if admin { secure::prepare(&secure::machine_dir()) } else { Ok(()) };
     let engine = match secured {
         Err(e) => Err(engine::EngineError::Failed(format!("can't secure NF Switcher's settings folder: {e}"))),
+        Ok(()) if !supported => Err(engine::EngineError::too_old()),
         Ok(()) if admin => engine::open_real(),
         Ok(()) => Err(engine::EngineError::NeedsAdmin),
     };

@@ -45,6 +45,28 @@ pub fn clock() -> String {
     format!("{:02}:{:02}", t.wHour, t.wMinute)
 }
 
+/// What a too-old Windows is told: why, and the way out where Windows Update has one (not on LTSC or Server).
+pub fn too_old_banner(this: Option<&engine::ThisWindows>) -> Banner {
+    let has = match this {
+        Some(w) => format!("This PC has {}, which doesn't have", w.name),
+        None => "This Windows doesn't have".into(),
+    };
+    // Windows Update only offers it to PCs that meet Windows 11's requirements (not to bypassed installs).
+    let update = match this {
+        Some(w) if !w.updatable => None,
+        Some(w) if w.windows10 => Some(" Windows 11 is a free upgrade in Windows Update if this PC meets its requirements."),
+        _ => Some(" The update is free in Windows Update if this PC meets Windows 11's requirements."),
+    };
+    Banner {
+        tone: Tone::Warn,
+        text: format!(
+            "NF Switcher needs Windows 11 24H2 or later. {has} the per-app connection policies it uses to pin apps.{}",
+            update.unwrap_or_default()
+        ),
+        button: update.map(|_| "Open Windows Update".to_string()),
+    }
+}
+
 pub fn log(line: &str) {
     // Only into a folder that already exists (the elevated start secures it); never created from here.
     let path = crate::config::data_dir().join("nf-switcher.log");
@@ -99,9 +121,12 @@ impl App {
         self.sync(false);
     }
 
-    /// Wi-Fi is the pin target, it's down, and an app is pinned: it's worth connecting it again.
+    /// Wi-Fi is the pin target, it's down, and an app is pinned: it's worth connecting it again. Not when nothing
+    /// can be pinned (no admin, too-old Windows): then Wi-Fi is left alone.
     fn wifi_wanted(&self) -> bool {
-        !self.cfg.pinned().is_empty() && self.target().is_some_and(|t| t.kind == Kind::Wifi && !t.up())
+        matches!(self.error, None | Some(EngineError::Failed(_)))
+            && !self.cfg.pinned().is_empty()
+            && self.target().is_some_and(|t| t.kind == Kind::Wifi && !t.up())
     }
 
     /// "Connect Wi-Fi", and the automatic attempt (at most once a minute, so it never fights Windows or the user).
@@ -216,8 +241,12 @@ impl App {
     }
 
     fn changed(&mut self) {
-        if let Err(e) = self.cfg.save() {
-            log(&format!("saving settings failed: {e}"));
+        // Without admin nothing is saved: the settings folder is admin-only, and a copy without admin must not
+        // create it as an ordinary user (the tray's "Revert all" gets here too).
+        if !self.read_only() {
+            if let Err(e) = self.cfg.save() {
+                log(&format!("saving settings failed: {e}"));
+            }
         }
         self.sync(false);
     }
@@ -394,7 +423,7 @@ impl App {
         }
         match &self.error {
             Some(EngineError::NeedsAdmin) => return ("Needs admin to switch".into(), true),
-            Some(EngineError::Unsupported(_)) => return ("Not possible on this Windows".into(), true),
+            Some(EngineError::Unsupported(_)) => return ("Needs Windows 11 24H2 or later".into(), true),
             Some(EngineError::Failed(_)) => return ("Couldn't switch it (see the message above)".into(), true),
             None => {}
         }
@@ -448,9 +477,7 @@ impl App {
                     button: Some("Restart as admin".into()),
                 })
             }
-            Some(EngineError::Unsupported(why)) => {
-                return Some(Banner { tone: Tone::Error, text: format!("This Windows can't pin apps to a connection. {why}."), button: None })
-            }
+            Some(EngineError::Unsupported(_)) => return Some(too_old_banner(engine::this_windows().as_ref())),
             Some(EngineError::Failed(why)) => {
                 return Some(Banner { tone: Tone::Error, text: format!("Windows refused the change: {why}"), button: Some("Try again".into()) })
             }
@@ -713,5 +740,47 @@ mod tests {
         assert_eq!(m.status, "Needs admin");
         assert_eq!(m.banner.unwrap().button.as_deref(), Some("Restart as admin"));
         assert_eq!(m.footer, "Not admin");
+    }
+
+    #[test]
+    fn too_old_windows_says_why_and_offers_windows_update() {
+        let (mut a, _) = app_with(vec![iface(Kind::Wifi, "{W}", 2, true, true, false)]);
+        a.cfg.set_route(r"C:\B\brave.exe", "Brave", Route::Wifi);
+        a.error = Some(EngineError::too_old());
+        let mut m = Model::default();
+        a.fill(&mut m);
+        assert_eq!(m.status, "Not supported");
+        let b = m.banner.unwrap();
+        assert!(b.text.starts_with("NF Switcher needs Windows 11 24H2 or later.") && b.text.contains("free"));
+        assert_eq!(b.button.as_deref(), Some("Open Windows Update"));
+        assert_eq!(m.apps[0].status, "Needs Windows 11 24H2 or later");
+
+        let win = |name: &str, windows10, updatable| engine::ThisWindows { name: name.into(), windows10, updatable };
+        let b = too_old_banner(Some(&win("Windows 11 23H2", false, true)));
+        assert!(b.text.contains("This PC has Windows 11 23H2, which doesn't have"));
+        assert!(b.text.ends_with("free in Windows Update if this PC meets Windows 11's requirements."));
+        assert_eq!(b.button.as_deref(), Some("Open Windows Update"));
+        // Windows 10 gets Windows 11 as an upgrade.
+        let b = too_old_banner(Some(&win("Windows 10 22H2", true, true)));
+        assert!(b.text.contains("free upgrade") && b.button.is_some());
+        // LTSC and Server: Windows Update has nothing to offer, so no promise and no button.
+        for w in [win("Windows 10 LTSC 21H2", true, false), win("Windows Server 2022 Standard", false, false)] {
+            let b = too_old_banner(Some(&w));
+            assert!(b.text.ends_with("it uses to pin apps.") && !b.text.contains("free"), "{}", b.text);
+            assert!(b.button.is_none());
+        }
+        let b = too_old_banner(None);
+        assert!(b.text.contains("This Windows doesn't have") && b.button.is_some());
+    }
+
+    #[test]
+    fn wifi_is_left_alone_when_nothing_can_be_pinned() {
+        let (mut a, _) = app_with(vec![iface(Kind::Wifi, "{W}", 2, false, true, false)]);
+        a.cfg.set_route(r"C:\B\brave.exe", "Brave", Route::Wifi);
+        assert!(a.wifi_wanted());
+        for e in [EngineError::too_old(), EngineError::NeedsAdmin] {
+            a.error = Some(e);
+            assert!(!a.wifi_wanted());
+        }
     }
 }

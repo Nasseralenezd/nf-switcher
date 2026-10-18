@@ -585,6 +585,7 @@ impl Flyout {
                 match self.m.banner.as_ref().and_then(|b| b.button.as_deref()) {
                     Some("Restart as admin") => return Effect::RestartAdmin,
                     Some("Connect Wi-Fi") => self.app.connect_wifi(false),
+                    Some("Open Windows Update") => return Effect::OpenUrl(crate::update::WINDOWS_UPDATE.into()),
                     _ => self.app.retry(),
                 }
             }
@@ -899,7 +900,8 @@ fn run_effect(hwnd: HWND, e: Effect) {
                 f.modal = false;
                 match cmd {
                     1 => f.show(),
-                    2 => {
+                    // Without admin nothing was applied, and nothing is changed (as in the flyout).
+                    2 if !f.app.read_only() => {
                         f.app.revert_all();
                         f.refresh();
                         f.tray(false);

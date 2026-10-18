@@ -91,7 +91,8 @@ updates in place and keeps your settings.
 
 ### Requirements
 
-- Windows 11, version 24H2 or later, 64-bit
+- Windows 11, version 24H2 or later, 64-bit (a free update for PCs that meet Windows 11's requirements, see the
+  [FAQ](#faq))
 - Wi-Fi plus a second connection, usually Ethernet (a phone's USB tethering works in place of Wi-Fi too)
 - An admin account (see [Why does it need admin?](#faq))
 
@@ -209,10 +210,13 @@ A pinned app goes around a full-tunnel VPN, straight out over Wi-Fi. NF Switcher
 </details>
 
 <details>
-<summary><b>Does it work on Windows 10?</b></summary>
+<summary><b>Does it work on older Windows 11, or Windows 10?</b></summary>
 
-No. The connection policies it uses arrived in Windows 11 24H2. On older Windows, NF Switcher tells you so and
-doesn't change anything.
+No. The per-app connection policies it uses arrived in Windows 11 24H2, so 21H2, 22H2, 23H2 and Windows 10 don't
+have them. **The update is free:** if your PC meets Windows 11's requirements, Settings › Windows Update installs the
+latest Windows 11 (Windows 10 PCs that meet them can upgrade for free too). LTSC editions and Windows Server don't get
+it through Windows Update. On older Windows, the app explains why and has an **Open Windows Update** button. It
+doesn't ask for admin and doesn't pin anything.
 
 </details>
 

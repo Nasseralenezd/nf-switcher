@@ -13,6 +13,44 @@ pub fn open_real() -> Result<Box<dyn Engine>, EngineError> {
     Ok(Box::new(wfp::WfpEngine::new(b, routepolicies::Netsh::new())))
 }
 
+/// Can this Windows pin apps at all (Windows 11 24H2 and later)? Needs no admin, so a too-old Windows is told
+/// apart before asking for UAC.
+pub fn supported() -> bool {
+    wfp::real::policy_functions().is_some()
+}
+
+/// This Windows as people know it, for the "needs Windows 11 24H2" message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThisWindows {
+    /// "Windows 11 23H2", "Windows 10 LTSC 21H2", "Windows Server 2022 Standard".
+    pub name: String,
+    /// Windows 10: the way forward is an upgrade to Windows 11, not an update.
+    pub windows10: bool,
+    /// Can Windows Update bring it to a newer Windows 11? Not on Server, and not on LTSC, which never gets
+    /// feature updates.
+    pub updatable: bool,
+}
+
+pub fn this_windows() -> Option<ThisWindows> {
+    const KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let read = |v: &str| crate::installer::reg_read(KEY, v).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let build: u32 = read("CurrentBuild")?.parse().ok()?;
+    if read("InstallationType").is_some_and(|t| t.starts_with("Server")) {
+        let name = read("ProductName").unwrap_or_else(|| "Windows Server".into());
+        return Some(ThisWindows { name, windows10: false, updatable: false });
+    }
+    // EnterpriseS, EnterpriseSN, IoTEnterpriseS...: the Long-Term Servicing editions.
+    let ltsc = read("EditionID").is_some_and(|e| e.contains("EnterpriseS"));
+    // ProductName still says "Windows 10" on Windows 11, so the build tells them apart.
+    let base = if build >= 22000 { "Windows 11" } else { "Windows 10" };
+    let base = if ltsc { format!("{base} LTSC") } else { base.to_string() };
+    let name = match read("DisplayVersion") {
+        Some(v) => format!("{base} {v}"),
+        None => format!("{base} (build {build})"),
+    };
+    Some(ThisWindows { name, windows10: build < 22000, updatable: !ltsc })
+}
+
 /// An IPv4 network, like 192.168.0.0/24.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Net4 {
@@ -214,6 +252,13 @@ pub enum EngineError {
     Failed(String),
 }
 
+impl EngineError {
+    /// This Windows has no connection policies.
+    pub fn too_old() -> EngineError {
+        EngineError::Unsupported("Windows 11 24H2 or later is needed".into())
+    }
+}
+
 impl std::fmt::Display for EngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -289,6 +334,24 @@ pub mod tests {
 
     fn eth_wifi(wifi_up: bool, wifi_v6: bool) -> Vec<Iface> {
         vec![iface(Kind::Ethernet, "{E}", 1, true, true, true), iface(Kind::Wifi, "{W}", 2, wifi_up, wifi_v6, false)]
+    }
+
+    #[test]
+    fn connection_policies_come_with_windows_11_24h2() {
+        // Reads this PC only: 24H2/25H2/26H2 (builds 26100-26300) have them, 21H2-23H2 (22000-22631) don't.
+        let key = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+        let build: u32 = crate::installer::reg_read(key, "CurrentBuild").unwrap().trim().parse().unwrap();
+        if (26100..28000).contains(&build) {
+            assert!(supported());
+        }
+        if build <= 22631 {
+            assert!(!supported());
+        }
+        let w = this_windows().unwrap();
+        assert!(w.name.starts_with("Windows "));
+        if !w.name.starts_with("Windows Server") {
+            assert_eq!(w.windows10, build < 22000);
+        }
     }
 
     #[test]

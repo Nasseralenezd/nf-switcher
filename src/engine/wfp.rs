@@ -323,17 +323,27 @@ pub mod real {
         if r == 0 { Ok(()) } else { Err(format!("{what} failed: 0x{r:08X}")) }
     }
 
+    /// The connection-policy functions of Windows' firewall DLL. None before Windows 11 24H2, which doesn't have
+    /// them. Needs no admin.
+    pub(crate) fn policy_functions() -> Option<(PolicyAdd, PolicyDelete)> {
+        unsafe {
+            let dll = LoadLibraryExW(w!("fwpuclnt.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok()?;
+            let add = GetProcAddress(dll, PCSTR(b"FwpmConnectionPolicyAdd0\0".as_ptr()))?;
+            let del = GetProcAddress(dll, PCSTR(b"FwpmConnectionPolicyDeleteByKey0\0".as_ptr()))?;
+            Some((
+                std::mem::transmute::<unsafe extern "system" fn() -> isize, PolicyAdd>(add),
+                std::mem::transmute::<unsafe extern "system" fn() -> isize, PolicyDelete>(del),
+            ))
+        }
+    }
+
     impl RealWfp {
         /// Opens a dynamic WFP session. Fails with NeedsAdmin without admin, Unsupported before Windows 11 24H2.
         pub fn open() -> Result<RealWfp, EngineError> {
+            let Some((add_policy, del_policy)) = policy_functions() else {
+                return Err(EngineError::too_old());
+            };
             unsafe {
-                let dll = LoadLibraryExW(w!("fwpuclnt.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32)
-                    .map_err(|e| EngineError::Unsupported(e.message()))?;
-                let add = GetProcAddress(dll, PCSTR(b"FwpmConnectionPolicyAdd0\0".as_ptr()));
-                let del = GetProcAddress(dll, PCSTR(b"FwpmConnectionPolicyDeleteByKey0\0".as_ptr()));
-                let (Some(add), Some(del)) = (add, del) else {
-                    return Err(EngineError::Unsupported("Windows 11 24H2 or later is needed".into()));
-                };
                 let name = HSTRING::from("NF Switcher");
                 let session = FWPM_SESSION0 {
                     displayData: FWPM_DISPLAY_DATA0 { name: PWSTR(name.as_ptr() as *mut _), description: PWSTR::null() },
@@ -350,8 +360,8 @@ pub mod real {
                 let me = RealWfp {
                     h,
                     sublayer: GUID::new().map_err(|e| EngineError::Failed(e.message()))?,
-                    add_policy: std::mem::transmute::<unsafe extern "system" fn() -> isize, PolicyAdd>(add),
-                    del_policy: std::mem::transmute::<unsafe extern "system" fn() -> isize, PolicyDelete>(del),
+                    add_policy,
+                    del_policy,
                 };
                 let sub = FWPM_SUBLAYER0 {
                     subLayerKey: me.sublayer,

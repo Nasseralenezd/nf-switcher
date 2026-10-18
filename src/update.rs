@@ -157,11 +157,19 @@ fn variant_i4(v: i32) -> VARIANT {
     var
 }
 
-/// Opens a URL (or file) as the signed-in user, through Explorer's desktop (Raymond Chen's documented approach for
-/// starting something unelevated from an elevated process). Only https:// links of this repository are opened.
+/// Windows Update's page in Settings (the "needs Windows 11 24H2" message opens it).
+pub const WINDOWS_UPDATE: &str = "ms-settings:windowsupdate";
+
+/// What NF Switcher may open: this repository's https:// pages and Windows Update's page, nothing else.
+fn may_open(url: &str) -> bool {
+    url.starts_with(&format!("https://github.com/{REPO}/")) || url == WINDOWS_UPDATE
+}
+
+/// Opens a URL as the signed-in user, through Explorer's desktop (Raymond Chen's documented approach for starting
+/// something unelevated from an elevated process). Only what `may_open` allows is opened.
 pub fn open_unelevated(url: &str) -> Result<(), String> {
-    if !url.starts_with(&format!("https://github.com/{REPO}/")) {
-        return Err("not a link to NF Switcher's releases".into());
+    if !may_open(url) {
+        return Err("not a link NF Switcher opens".into());
     }
     unsafe {
         let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_LOCAL_SERVER).map_err(|e| e.message())?;
@@ -216,5 +224,11 @@ mod tests {
     fn only_our_links_are_opened() {
         assert!(open_unelevated("https://example.com/").is_err());
         assert!(open_unelevated("file:///C:/Windows/System32/cmd.exe").is_err());
+        // Checked without opening anything (no window during tests).
+        assert!(may_open(&format!("https://github.com/{REPO}/releases/latest")));
+        assert!(may_open(WINDOWS_UPDATE));
+        assert!(!may_open("ms-settings:network"));
+        assert!(!may_open("ms-settings:windowsupdate-action"));
+        assert!(!may_open(&format!("http://github.com/{REPO}/")));
     }
 }
