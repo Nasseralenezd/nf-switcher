@@ -1,0 +1,120 @@
+// Sample flyout states for --shots (the look is checked offscreen, never in a visible window). Real paths are
+// used where they exist on this PC so the icons can be checked too.
+use super::view::*;
+
+fn tiles(m: &mut Model) {
+    m.eth = Tile { title: "Ethernet · default".into(), sub: "192.168.1.20".into(), on: false, off: false };
+    m.wifi = Tile { title: "Wi-Fi · Home-5G".into(), sub: "192.168.0.34".into(), on: true, off: false };
+}
+
+pub fn main_page() -> Model {
+    let mut m = Model { status: "3 on Wi-Fi".into(), footer: "Admin".into(), update: Some("0.2.0".into()), ..Default::default() };
+    tiles(&mut m);
+    m.apps = vec![
+        AppItem {
+            name: "Brave".into(),
+            path: r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe".into(),
+            wifi: true,
+            status: "Running · 38 on Wi-Fi".into(),
+            warn: false,
+        },
+        AppItem {
+            name: "Spotify".into(),
+            path: r"C:\Users\You\AppData\Roaming\Spotify\Spotify.exe".into(),
+            wifi: true,
+            status: "Running · 6 on Wi-Fi · 2 still on Ethernet".into(),
+            warn: false,
+        },
+        AppItem {
+            name: "qBittorrent".into(),
+            path: r"C:\Program Files\qBittorrent\qbittorrent.exe".into(),
+            wifi: true,
+            status: "Waits until it starts".into(),
+            warn: false,
+        },
+        AppItem {
+            name: "Discord".into(),
+            path: r"C:\Users\You\AppData\Local\Discord\app-1.0.9213\Discord.exe".into(),
+            wifi: false,
+            status: "Running · default route".into(),
+            warn: false,
+        },
+    ];
+    m.hover = Some(Hit::AppRow(1));
+    m
+}
+
+pub fn wifi_down() -> Model {
+    let mut m = main_page();
+    m.status = "Wi-Fi down".into();
+    m.wifi = Tile { title: "Wi-Fi".into(), sub: "Not connected".into(), on: false, off: true };
+    m.banner = Some(Banner {
+        tone: Tone::Warn,
+        text: "Wi-Fi isn't connected. Pinned apps use the default route until it's back.".into(),
+        button: None,
+    });
+    for a in m.apps.iter_mut().filter(|a| a.wifi) {
+        a.status = "Wi-Fi is down · using the default route".into();
+        a.warn = true;
+    }
+    m.hover = None;
+    m
+}
+
+pub fn needs_admin() -> Model {
+    let mut m = Model { status: "Needs admin".into(), footer: "Not admin".into(), ..Default::default() };
+    tiles(&mut m);
+    m.wifi.on = false;
+    m.banner = Some(Banner {
+        tone: Tone::Warn,
+        text: "Pinning apps to Wi-Fi needs admin rights. Windows will ask (UAC).".into(),
+        button: Some("Restart as admin".into()),
+    });
+    m.hover = Some(Hit::BannerButton);
+    m
+}
+
+pub fn add_page() -> Model {
+    let mut m = Model { page: Page::Add, running: 38, search: "ste".into(), search_focus: true, caret: true, ..Default::default() };
+    m.picks = vec![
+        PickItem { name: "Steam".into(), path: r"C:\Program Files (x86)\Steam\steam.exe".into(), added: false },
+        PickItem {
+            name: "Steam Client WebHelper".into(),
+            path: r"C:\Program Files (x86)\Steam\bin\cef\cef.win64\steamwebhelper.exe".into(),
+            added: false,
+        },
+        PickItem { name: "SteelSeries GG".into(), path: r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe".into(), added: true },
+    ];
+    m.hover = Some(Hit::Pick(0));
+    m
+}
+
+pub fn settings_page() -> Model {
+    let mut m = Model { page: Page::Settings, ..Default::default() };
+    m.block_when_down = false;
+    m.adapter_auto = true;
+    m.adapters = vec![
+        AdapterItem { name: "Wi-Fi".into(), sub: "Realtek 8922AE WiFi 7 · Home-5G".into(), selected: false },
+        AdapterItem { name: "Ethernet 2".into(), sub: "USB tethering · 192.168.42.7".into(), selected: false },
+    ];
+    m.about = vec![
+        "NF Switcher 0.1.0".into(),
+        "Pinned apps are sent over Wi-Fi with Windows' own connection policies (WFP). Nothing is changed for good: \
+         closing NF Switcher removes them, and so does Windows if NF Switcher stops."
+            .into(),
+    ];
+    m.hover = Some(Hit::WhenDown(true));
+    m.update = Some("0.2.0".into());
+    m.update_note = "Checked at 21:30: version 0.2.0 is out".into();
+    m
+}
+
+pub fn all() -> Vec<(&'static str, Model)> {
+    vec![
+        ("main", main_page()),
+        ("wifi-down", wifi_down()),
+        ("needs-admin", needs_admin()),
+        ("add", add_page()),
+        ("settings", settings_page()),
+    ]
+}
