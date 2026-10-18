@@ -289,7 +289,8 @@ cargo test
 - `nf-switcher.exe --selftest` (admin): pins throwaway copies of `probe.exe` and checks with real TCP and UDP traffic
   that routing, the Ethernet network, blocking and cleanup all work. Report in
   `%ProgramData%\NF Switcher\selftest\report.txt`.
-- `tools/make-icon.ps1` rebuilds `res/app.ico`; `tools/readme-images.ps1` remakes the pictures in `docs/images`.
+- `tools/make-icon.ps1` rebuilds the icons in `res` (the app's, and the tray's for dark and light taskbars);
+  `tools/readme-images.ps1` remakes the pictures in `docs/images`.
 
 </details>
 

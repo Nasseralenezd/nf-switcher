@@ -23,6 +23,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows::Win32::UI::Controls::{LoadIconMetric, LIM_SMALL, WM_MOUSELEAVE};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -104,8 +105,11 @@ struct Flyout {
     taskbar_created: u32,
     _watcher: Option<crate::net::Watcher>,
     test: Option<UiTest>,
-    /// The tray icon, loaded once (Shell_NotifyIcon copies it; a fresh one per update would leak).
+    /// The tray icon for the taskbar's theme, loaded once per theme (Shell_NotifyIcon copies it; a fresh one per
+    /// update would leak). `icon_owned`: ours to destroy (not the stock fallback). `icon_dark`: the white one.
     icon: HICON,
+    icon_owned: bool,
+    icon_dark: bool,
     /// The icon is missing from the tray (adding failed): retried on a timer.
     tray_missing: u32,
     /// The foreground window right after showing: if Windows didn't let the flyout take focus, another window
@@ -126,6 +130,36 @@ fn lo(v: isize) -> i32 {
 }
 fn hi(v: isize) -> i32 {
     ((v >> 16) & 0xffff) as i16 as i32
+}
+
+/// The tray icon, no background like Windows' own: white on a dark taskbar, near black on a light one (res/app.rc).
+/// Returns it and whether it's ours to destroy.
+fn tray_icon(dark: bool) -> (HICON, bool) {
+    unsafe {
+        let hinst = GetModuleHandleW(None).ok().map(|h| HINSTANCE(h.0));
+        let id: usize = if dark { 2 } else { 3 };
+        match LoadIconMetric(hinst, PCWSTR(id as _), LIM_SMALL).or_else(|_| LoadIconMetric(hinst, PCWSTR(1 as _), LIM_SMALL)) {
+            Ok(i) => (i, true),
+            Err(_) => (LoadIconW(None, IDI_APPLICATION).unwrap_or_default(), false),
+        }
+    }
+}
+
+/// Is the taskbar dark, so the tray glyph should be white? Contrast themes leave SystemUsesLightTheme as it was, so
+/// with one on, the window colour decides instead ("Desert" is near white, "Aquatic" black).
+fn taskbar_dark(theme: &Theme) -> bool {
+    unsafe {
+        let mut hc = HIGHCONTRASTW { cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32, ..Default::default() };
+        let on = SystemParametersInfoW(SPI_GETHIGHCONTRAST, hc.cbSize, Some(&mut hc as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
+            .is_ok()
+            && hc.dwFlags.0 & HCF_HIGHCONTRASTON.0 != 0;
+        if on {
+            let c = GetSysColor(COLOR_WINDOW);
+            let (r, g, b) = (c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF);
+            return 299 * r + 587 * g + 114 * b < 128_000;
+        }
+    }
+    theme.dark
 }
 
 fn wide_fixed<const N: usize>(s: &str) -> [u16; N] {
@@ -178,6 +212,26 @@ impl Flyout {
                 }
             } else {
                 let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+            }
+        }
+    }
+
+    /// Reads Windows' theme again; when the taskbar went light or dark, the tray icon follows. Called on
+    /// WM_SETTINGCHANGE, and also when the flyout opens and once a minute, in case UIPI kept that broadcast from
+    /// the elevated window.
+    fn follow_theme(&mut self) {
+        self.theme = Theme::current();
+        let dark = taskbar_dark(&self.theme);
+        if dark != self.icon_dark {
+            let (old, owned) = (self.icon, self.icon_owned);
+            (self.icon, self.icon_owned) = tray_icon(dark);
+            self.icon_dark = dark;
+            self.tray(false);
+            // Explorer keeps its own copy, so the old one can go.
+            if owned {
+                unsafe {
+                    let _ = DestroyIcon(old);
+                }
             }
         }
     }
@@ -287,7 +341,7 @@ impl Flyout {
         self.m.scroll = 0.0;
         self.m.hover = None;
         self.m.pressed = None;
-        self.theme = Theme::current();
+        self.follow_theme();
         self.visible = true;
         self.refresh();
         unsafe {
@@ -772,6 +826,7 @@ impl Flyout {
                         self.app.refresh_net();
                         // Windows drops an idle Wi-Fi while Ethernet is plugged in; pinned apps need it.
                         self.app.connect_wifi(true);
+                        self.follow_theme();
                     }
                     T_VERSIONS => {
                         // An app in a version folder (Discord) may update and restart from a new folder any time.
@@ -796,8 +851,9 @@ impl Flyout {
                 unsafe { SetTimer(Some(self.hwnd), T_NET, 400, None) };
                 done
             }
-            WM_SETTINGCHANGE => {
-                self.theme = Theme::current();
+            // Light/dark mode, and a contrast theme switched on or off.
+            WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_THEMECHANGED => {
+                self.follow_theme();
                 self.invalidate();
                 (None, Effect::None)
             }
@@ -1034,12 +1090,15 @@ pub fn run(app: App, opts: Options) -> windows::core::Result<()> {
         // Anything that changed between the first read of the adapters and the watcher starting.
         let _ = PostMessageW(Some(hwnd), WM_NETCHANGE, WPARAM(0), LPARAM(0));
         let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+        let theme = Theme::current();
+        let icon_dark = taskbar_dark(&theme);
+        let (icon, icon_owned) = tray_icon(icon_dark);
         let fly = Flyout {
             hwnd,
             app,
             m: Model::default(),
             frame: Frame::default(),
-            theme: Theme::current(),
+            theme,
             factory,
             fonts: Fonts::new()?,
             icons: IconCache::new(IconCache::wic()?),
@@ -1055,10 +1114,9 @@ pub fn run(app: App, opts: Options) -> windows::core::Result<()> {
             _watcher: Some(watcher),
             test: opts.uitest.clone().map(|dir| UiTest { dir, step: 0, log: Vec::new() }),
             fg_at_show: HWND::default(),
-            icon: {
-                let hinst = GetModuleHandleW(None).ok().map(|h| HINSTANCE(h.0));
-                LoadIconMetric(hinst, PCWSTR(1 as _), LIM_SMALL).or_else(|_| LoadIconW(None, IDI_APPLICATION)).unwrap_or_default()
-            },
+            icon,
+            icon_owned,
+            icon_dark,
             tray_missing: 0,
         };
         FLY.with(|c| *c.borrow_mut() = Some(fly));

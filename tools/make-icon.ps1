@@ -1,47 +1,61 @@
-# Makes res/app.ico: the Segoe Fluent Icons "switch" glyph (E8AB) in white on an accent tile, PNG entries 16-256 px.
+# Makes the icons: the Segoe Fluent Icons "switch" glyph (E8AB) on no background, PNG entries.
+#   res/app.ico         the app (Start, Installed apps, Explorer): blue, which reads on light and dark
+#   res/tray-dark.ico   the tray icon on a dark taskbar: white, like Windows' own tray icons
+#   res/tray-light.ico  the tray icon on a light taskbar: near black
 # Run: powershell -NoProfile -File tools/make-icon.ps1
 Add-Type -AssemblyName System.Drawing
-$out = Join-Path $PSScriptRoot '..\res\app.ico'
-$sizes = 16, 20, 24, 32, 40, 48, 64, 256
-$pngs = @()
-foreach ($s in $sizes) {
+$res = Join-Path $PSScriptRoot '..\res'
+
+# One size: the glyph at its design size (em = icon size), centred on whole pixels so its strokes stay sharp.
+function Glyph([int]$s, [scriptblock]$brushFor) {
   $bmp = New-Object System.Drawing.Bitmap $s, $s, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = 'AntiAlias'
-  $g.TextRenderingHint = 'AntiAliasGridFit'
+  # Pixel (x, y) covers x..x+1: without this GDI+ centres pixels on whole numbers, and every 1 px stroke turns
+  # into two half-transparent rows.
+  $g.PixelOffsetMode = 'Half'
   $g.Clear([System.Drawing.Color]::Transparent)
-  $r = [Math]::Max(3, [int]($s * 0.22))
+  $family = New-Object System.Drawing.FontFamily 'Segoe Fluent Icons'
   $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $d = $r * 2
-  $path.AddArc(0, 0, $d, $d, 180, 90)
-  $path.AddArc($s - $d - 1, 0, $d, $d, 270, 90)
-  $path.AddArc($s - $d - 1, $s - $d - 1, $d, $d, 0, 90)
-  $path.AddArc(0, $s - $d - 1, $d, $d, 90, 90)
-  $path.CloseFigure()
-  $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.Point 0, 0), (New-Object System.Drawing.Point $s, $s), ([System.Drawing.Color]::FromArgb(255, 0, 120, 212)), ([System.Drawing.Color]::FromArgb(255, 0, 90, 170))
+  $path.AddString([string][char]0xE8AB, $family, 0, [single]$s, (New-Object System.Drawing.PointF 0, 0), [System.Drawing.StringFormat]::GenericTypographic)
+  $b = $path.GetBounds()
+  $m = New-Object System.Drawing.Drawing2D.Matrix
+  $m.Translate([Math]::Round(($s - $b.Width) / 2 - $b.X), [Math]::Round(($s - $b.Height) / 2 - $b.Y))
+  $path.Transform($m)
+  $brush = & $brushFor $path.GetBounds()
   $g.FillPath($brush, $path)
-  $font = New-Object System.Drawing.Font 'Segoe Fluent Icons', ([single]($s * 0.56)), ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
-  $fmt = New-Object System.Drawing.StringFormat
-  $fmt.Alignment = 'Center'; $fmt.LineAlignment = 'Center'
-  $rect = New-Object System.Drawing.RectangleF 0, ([single]($s * 0.02)), $s, $s
-  $g.DrawString([string][char]0xE8AB, $font, [System.Drawing.Brushes]::White, $rect, $fmt)
-  $g.Dispose()
+  $brush.Dispose(); $path.Dispose(); $g.Dispose()
   $ms = New-Object System.IO.MemoryStream
   $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
-  $pngs += , $ms.ToArray()
+  , $ms.ToArray()
 }
-$fs = [System.IO.File]::Create($out)
-$w = New-Object System.IO.BinaryWriter $fs
-$w.Write([UInt16]0); $w.Write([UInt16]1); $w.Write([UInt16]$sizes.Count)
-$offset = 6 + 16 * $sizes.Count
-for ($i = 0; $i -lt $sizes.Count; $i++) {
-  $s = $sizes[$i]; $b = if ($s -ge 256) { 0 } else { $s }
-  $w.Write([byte]$b); $w.Write([byte]$b); $w.Write([byte]0); $w.Write([byte]0)
-  $w.Write([UInt16]1); $w.Write([UInt16]32)
-  $w.Write([UInt32]$pngs[$i].Length); $w.Write([UInt32]$offset)
-  $offset += $pngs[$i].Length
+
+function WriteIco([string]$out, [int[]]$sizes, [scriptblock]$brushFor) {
+  $pngs = @()
+  foreach ($s in $sizes) { $pngs += , (Glyph $s $brushFor) }
+  $fs = [System.IO.File]::Create($out)
+  $w = New-Object System.IO.BinaryWriter $fs
+  $w.Write([UInt16]0); $w.Write([UInt16]1); $w.Write([UInt16]$sizes.Count)
+  $offset = 6 + 16 * $sizes.Count
+  for ($i = 0; $i -lt $sizes.Count; $i++) {
+    $s = $sizes[$i]; $b = if ($s -ge 256) { 0 } else { $s }
+    $w.Write([byte]$b); $w.Write([byte]$b); $w.Write([byte]0); $w.Write([byte]0)
+    $w.Write([UInt16]1); $w.Write([UInt16]32)
+    $w.Write([UInt32]$pngs[$i].Length); $w.Write([UInt32]$offset)
+    $offset += $pngs[$i].Length
+  }
+  foreach ($p in $pngs) { $w.Write($p) }
+  $w.Close()
+  "wrote $out ($offset bytes)"
 }
-foreach ($p in $pngs) { $w.Write($p) }
-$w.Close()
-"wrote $out ($offset bytes)"
+
+# The app: Windows' accent blue, lighter at the top (Fluent style), so it holds up on light and dark.
+WriteIco (Join-Path $res 'app.ico') @(16, 20, 24, 32, 40, 48, 64, 256) {
+  param($r)
+  New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 0, ($r.Top - 1)), (New-Object System.Drawing.PointF 0, ($r.Bottom + 1)), ([System.Drawing.Color]::FromArgb(255, 41, 151, 255)), ([System.Drawing.Color]::FromArgb(255, 0, 103, 192))
+}
+# The tray: the small icon at every scaling from 100% to 400%, so Windows never has to resize one.
+$tray = @(16, 20, 24, 28, 32, 36, 40, 48, 56, 64)
+WriteIco (Join-Path $res 'tray-dark.ico') $tray { New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White) }
+WriteIco (Join-Path $res 'tray-light.ico') $tray { New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 27, 27, 27)) }

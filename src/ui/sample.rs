@@ -162,7 +162,7 @@ pub fn settings_page() -> Model {
         AdapterItem { name: "Ethernet 2".into(), sub: "USB tethering · 192.168.42.7".into(), selected: false },
     ];
     m.about = vec![
-        "NF Switcher 0.1.0".into(),
+        format!("NF Switcher {}", env!("CARGO_PKG_VERSION")),
         "Pinned apps are sent over Wi-Fi with Windows' own connection policies (WFP). Nothing is changed for good: \
          closing NF Switcher removes them, and so does Windows if NF Switcher stops."
             .into(),
