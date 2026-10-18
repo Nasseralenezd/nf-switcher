@@ -249,6 +249,8 @@ pub enum EngineError {
     NeedsAdmin,
     /// This Windows has no connection policies (before Windows 11 24H2).
     Unsupported(String),
+    /// The settings folder couldn't be made admin-only, so nothing in it is applied until the next start.
+    Insecure(String),
     Failed(String),
 }
 
@@ -257,6 +259,12 @@ impl EngineError {
     pub fn too_old() -> EngineError {
         EngineError::Unsupported("Windows 11 24H2 or later is needed".into())
     }
+
+    /// A failure that can pass (the filtering service restarting), so it's worth opening WFP again. Every other
+    /// reason lasts as long as NF Switcher runs.
+    pub fn passing(&self) -> bool {
+        matches!(self, EngineError::Failed(_))
+    }
 }
 
 impl std::fmt::Display for EngineError {
@@ -264,6 +272,7 @@ impl std::fmt::Display for EngineError {
         match self {
             EngineError::NeedsAdmin => write!(f, "needs admin"),
             EngineError::Unsupported(s) => write!(f, "not supported: {s}"),
+            EngineError::Insecure(s) => write!(f, "can't secure NF Switcher's settings folder: {s}"),
             EngineError::Failed(s) => write!(f, "{s}"),
         }
     }
@@ -276,7 +285,8 @@ pub trait Engine {
     fn clear(&mut self) -> Result<(), EngineError>;
 }
 
-/// The backend when routing can't run (no admin, old Windows): it applies nothing and says why.
+/// The backend when routing can't run (no admin, old Windows, an unsafe settings folder): it applies nothing and
+/// says why.
 pub struct Unavailable(pub EngineError);
 
 impl Engine for Unavailable {

@@ -530,7 +530,7 @@ impl Flyout {
     fn click(&mut self, h: Hit) -> Effect {
         let changes = !matches!(h, Hit::AddApp | Hit::Gear | Hit::Back | Hit::Search | Hit::BannerButton | Hit::UpdateDownload);
         if changes && self.app.read_only() {
-            // The banner already says why and offers "Restart as admin".
+            // The banner already says why (and offers "Restart as admin" when that's it).
             return Effect::None;
         }
         match h {

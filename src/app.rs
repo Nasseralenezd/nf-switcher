@@ -67,8 +67,24 @@ pub fn too_old_banner(this: Option<&engine::ThisWindows>) -> Banner {
     }
 }
 
+/// What an unsafe settings folder is told. No "Try again": the folder is only secured at start.
+pub fn insecure_banner(why: &str) -> Banner {
+    Banner {
+        tone: Tone::Error,
+        text: format!(
+            "No app is pinned: NF Switcher couldn't make its settings folder admin-only. {why}. Quit NF Switcher and \
+             start it again to retry."
+        ),
+        button: None,
+    }
+}
+
 pub fn log(line: &str) {
-    // Only into a folder that already exists (the elevated start secures it); never created from here.
+    // Only into a folder that already exists (the elevated start secures it); never created from here, and never
+    // into one that couldn't be secured (a link planted there would be written through).
+    if crate::secure::failed() {
+        return;
+    }
     let path = crate::config::data_dir().join("nf-switcher.log");
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > 256 * 1024) {
         let _ = std::fs::remove_file(&path);
@@ -79,9 +95,15 @@ pub fn log(line: &str) {
     }
 }
 
+/// Running as admin and nothing lasting in the way (no old Windows, no unsafe settings folder): a WFP session that
+/// failed may be opened again.
+fn may_reopen(admin: bool, engine: &Result<Box<dyn Engine>, EngineError>) -> bool {
+    admin && engine.as_ref().err().is_none_or(EngineError::passing)
+}
+
 impl App {
     pub fn new(admin: bool, engine: Result<Box<dyn Engine>, EngineError>) -> App {
-        let can_reopen = admin && !matches!(engine, Err(EngineError::NeedsAdmin) | Err(EngineError::Unsupported(_)));
+        let can_reopen = may_reopen(admin, &engine);
         let (engine, error): (Box<dyn Engine>, _) = match engine {
             Ok(e) => (e, None),
             Err(e) => (Box::new(engine::Unavailable(e.clone())), Some(e)),
@@ -122,7 +144,7 @@ impl App {
     }
 
     /// Wi-Fi is the pin target, it's down, and an app is pinned: it's worth connecting it again. Not when nothing
-    /// can be pinned (no admin, too-old Windows): then Wi-Fi is left alone.
+    /// can be pinned (no admin, too-old Windows, an unsafe settings folder): then Wi-Fi is left alone.
     fn wifi_wanted(&self) -> bool {
         matches!(self.error, None | Some(EngineError::Failed(_)))
             && !self.cfg.pinned().is_empty()
@@ -221,7 +243,8 @@ impl App {
                     log(&format!("applied: {} policies, {} filters, skipped {:?}", a.policies, a.filters, a.skipped));
                 }
                 self.applied = a;
-                // A permanent reason (no admin, old Windows) stays; a failure clears once applying works.
+                // A lasting reason (no admin, old Windows, an unsafe settings folder) stays, even with nothing to
+                // apply; a failure clears once applying works.
                 if matches!(self.error, Some(EngineError::Failed(_))) {
                     self.error = None;
                 }
@@ -327,9 +350,10 @@ impl App {
         (ok, failed)
     }
 
-    /// Without admin nothing can be applied, so nothing is changed or saved either.
+    /// Without admin nothing can be applied, so nothing is changed or saved either. The same when the settings
+    /// folder couldn't be made admin-only: nothing more is written into it.
     pub fn read_only(&self) -> bool {
-        !self.admin
+        !self.admin || matches!(self.error, Some(EngineError::Insecure(_)))
     }
 
     pub fn retry(&mut self) {
@@ -424,7 +448,9 @@ impl App {
         match &self.error {
             Some(EngineError::NeedsAdmin) => return ("Needs admin to switch".into(), true),
             Some(EngineError::Unsupported(_)) => return ("Needs Windows 11 24H2 or later".into(), true),
-            Some(EngineError::Failed(_)) => return ("Couldn't switch it (see the message above)".into(), true),
+            Some(EngineError::Insecure(_) | EngineError::Failed(_)) => {
+                return ("Couldn't switch it (see the message above)".into(), true)
+            }
             None => {}
         }
         if self.applied.skipped.iter().any(|(p, _)| norm(p) == norm(rule_path)) {
@@ -459,7 +485,7 @@ impl App {
         match &self.error {
             Some(EngineError::NeedsAdmin) => "Needs admin".into(),
             Some(EngineError::Unsupported(_)) => "Not supported".into(),
-            Some(EngineError::Failed(_)) => "Error".into(),
+            Some(EngineError::Insecure(_) | EngineError::Failed(_)) => "Error".into(),
             None if pinned == 0 => "Ready".into(),
             None if !self.target().is_some_and(|t| t.up()) => format!("{} down", self.target_label()),
             None => format!("{pinned} on {}", self.target_label()),
@@ -478,6 +504,7 @@ impl App {
                 })
             }
             Some(EngineError::Unsupported(_)) => return Some(too_old_banner(engine::this_windows().as_ref())),
+            Some(EngineError::Insecure(why)) => return Some(insecure_banner(why)),
             Some(EngineError::Failed(why)) => {
                 return Some(Banner { tone: Tone::Error, text: format!("Windows refused the change: {why}"), button: Some("Try again".into()) })
             }
@@ -771,6 +798,50 @@ mod tests {
         }
         let b = too_old_banner(None);
         assert!(b.text.contains("This Windows doesn't have") && b.button.is_some());
+    }
+
+    #[test]
+    fn a_settings_folder_that_couldnt_be_secured_stops_pinning_until_the_next_start() {
+        let insecure = || EngineError::Insecure(r"C:\ProgramData\NF Switcher\config.json: can't secure or remove it".into());
+        assert!(insecure().to_string().starts_with("can't secure NF Switcher's settings folder: C:\\ProgramData"));
+        // Only an ordinary WFP failure (the filtering service restarting) is worth a new WFP session.
+        let working = || -> Result<Box<dyn Engine>, EngineError> { Ok(Box::new(Recorder(Default::default()))) };
+        assert!(may_reopen(true, &working()) && !may_reopen(false, &working()));
+        assert!(may_reopen(true, &Err(EngineError::Failed("FwpmTransactionBegin0: 0x80320006".into()))));
+        for e in [insecure(), EngineError::NeedsAdmin, EngineError::too_old()] {
+            assert!(!may_reopen(true, &Err(e)));
+        }
+
+        let (mut a, _) = app_with(vec![
+            iface(Kind::Ethernet, "{E}", 1, true, true, true),
+            iface(Kind::Wifi, "{W}", 2, true, true, false),
+        ]);
+        // As App::new sets it up after main.rs's secure::prepare() failed.
+        a.can_reopen = may_reopen(true, &Err(insecure()));
+        a.engine = Box::new(engine::Unavailable(insecure()));
+        a.error = Some(insecure());
+        // Checked first: if it could reopen, sync() would open a real WFP session.
+        assert!(!a.can_reopen);
+        a.cfg.set_route(r"C:\B\brave.exe", "Brave", Route::Wifi);
+        a.sync(true);
+        assert_eq!(a.error, Some(insecure()));
+        assert!(a.read_only() && !a.wifi_wanted());
+        let mut m = Model::default();
+        a.fill(&mut m);
+        assert_eq!(m.status, "Error");
+        assert_eq!(m.apps[0].status, "Couldn't switch it (see the message above)");
+        let b = m.banner.as_ref().unwrap();
+        assert!(b.text.contains("admin-only") && b.text.contains(r"NF Switcher\config.json"), "{}", b.text);
+        assert_eq!(b.tone, Tone::Error);
+        assert!(b.button.is_none());
+
+        // With nothing pinned the engine has nothing to refuse, but the error and the banner stay.
+        a.revert_all();
+        a.retry();
+        assert_eq!(a.error, Some(insecure()));
+        a.fill(&mut m);
+        assert_eq!(m.status, "Error");
+        assert!(m.banner.is_some_and(|b| b.text.contains("admin-only")));
     }
 
     #[test]

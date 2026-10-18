@@ -231,7 +231,8 @@ fn main() {
     let admin = elevate::is_elevated();
     let secured = if admin { secure::prepare(&secure::machine_dir()) } else { Ok(()) };
     let engine = match secured {
-        Err(e) => Err(engine::EngineError::Failed(format!("can't secure NF Switcher's settings folder: {e}"))),
+        // For good: config.json in it is never applied, not even when WFP is tried again later.
+        Err(e) => Err(engine::EngineError::Insecure(e)),
         Ok(()) if !supported => Err(engine::EngineError::too_old()),
         Ok(()) if admin => engine::open_real(),
         Ok(()) => Err(engine::EngineError::NeedsAdmin),

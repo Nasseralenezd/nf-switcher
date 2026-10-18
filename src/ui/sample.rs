@@ -119,6 +119,25 @@ pub fn too_old() -> Model {
     m
 }
 
+/// The settings folder couldn't be made admin-only (here a planted file another program holds open).
+pub fn insecure() -> Model {
+    let mut m = Model { status: "Error".into(), footer: "Admin".into(), ..Default::default() };
+    tiles(&mut m);
+    m.wifi.on = false;
+    m.banner = Some(crate::app::insecure_banner(
+        r"C:\ProgramData\NF Switcher\config.json: can't secure or remove it: The process cannot access the file because it is being used by another process. (os error 32)",
+    ));
+    m.apps = vec![AppItem {
+        name: "Brave".into(),
+        path: r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe".into(),
+        wifi: true,
+        status: "Couldn't switch it (see the message above)".into(),
+        warn: true,
+    }];
+    m.hover = None;
+    m
+}
+
 pub fn add_page() -> Model {
     let mut m = Model { page: Page::Add, running: 38, search: "ste".into(), search_focus: true, caret: true, ..Default::default() };
     m.picks = vec![
@@ -161,6 +180,7 @@ pub fn all() -> Vec<(&'static str, Model)> {
         ("wifi-down", wifi_down()),
         ("needs-admin", needs_admin()),
         ("too-old", too_old()),
+        ("insecure", insecure()),
         ("add", add_page()),
         ("settings", settings_page()),
     ]
