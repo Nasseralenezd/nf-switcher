@@ -44,9 +44,8 @@ const T_FOCUS: usize = 7;
 const T_VERSIONS: usize = 8;
 const T_TRAY: usize = 9;
 const T_UPDATE: usize = 10;
-/// First update check 20 s after start, then every 12 hours.
+/// The update check: once, 20 s after start (the network may not be up yet at sign-in).
 const UPDATE_FIRST_MS: u32 = 20_000;
-const UPDATE_EVERY_MS: u32 = 12 * 60 * 60 * 1000;
 const TRAY_ID: u32 = 1;
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
 const MAX_H: f32 = 640.0;
@@ -800,7 +799,10 @@ impl Flyout {
                         self.refresh();
                     }
                     T_UPDATE => {
-                        unsafe { SetTimer(Some(self.hwnd), T_UPDATE, UPDATE_EVERY_MS, None) };
+                        // Only at start: no repeat while NF Switcher keeps running.
+                        unsafe {
+                            let _ = KillTimer(Some(self.hwnd), T_UPDATE);
+                        }
                         self.check_updates();
                     }
                     T_TRAY => {

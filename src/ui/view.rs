@@ -672,7 +672,7 @@ fn settings_page(c: &mut Ctx, max_h: f32) -> Frame {
     c.hover_bg(row, Hit::CheckUpdates);
     c.hit(row, Hit::CheckUpdates);
     if let Some(p) = c.p {
-        let sub = if m.update_note.is_empty() { "Asks GitHub about twice a day" } else { m.update_note.as_str() };
+        let sub = if m.update_note.is_empty() { "Asks GitHub once when NF Switcher starts" } else { m.update_note.as_str() };
         p.text("Check for updates", Rect::new(PAD, y + 4.0, w - 70.0, 20.0), Font::Body, th.text, Align::Left);
         p.text(sub, Rect::new(PAD, y + 22.0, w - 70.0, 18.0), Font::Caption, th.text3, Align::Left);
     }

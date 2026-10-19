@@ -1,6 +1,6 @@
 [package]
 name = "nf-switcher"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "NF Switcher: pick, per app, whether it uses Wi-Fi or Windows' default route"
 publish = false

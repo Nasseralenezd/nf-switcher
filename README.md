@@ -120,13 +120,15 @@ Good to know:
 | **Keep the Ethernet network on Ethernet** | Pinned apps still reach your router, NAS or printer on the Ethernet side. Only matters when Wi-Fi and Ethernet are different networks. | On |
 | **Reconnect Wi-Fi when Windows drops it** | While apps are pinned, connects Wi-Fi again with the network Windows already knows, at most once a minute. | On |
 | **Start with Windows** | Starts NF Switcher in the tray when you sign in, without a UAC prompt. | On |
-| **Check for updates** | Asks GitHub about twice a day whether a new version is out. | On |
+| **Check for updates** | Asks GitHub once, when NF Switcher starts, whether a new version is out. | On |
 
 ## Updates
 
-NF Switcher looks for a new release 20 seconds after it starts and then every 12 hours: one HTTPS request to
-GitHub's API. When a new version is out, the Settings gear gets a dot and Settings shows **New update** with a
-**Download** button, which opens the release page in your browser. Run the new setup and it updates in place.
+NF Switcher looks for a new release once, 20 seconds after it starts (with Start with Windows, that's once per
+sign-in): one HTTPS request to GitHub's API. It doesn't check again while it keeps running; switching **Check for
+updates** off and on checks right away. When a new version is out, the Settings gear gets a dot and Settings shows
+**New update** with a **Download** button, which opens the release page in your browser. Run the new setup and it
+updates in place.
 
 ## Uninstall
 

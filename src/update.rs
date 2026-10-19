@@ -1,5 +1,5 @@
 // Update check: asks GitHub for the latest NF Switcher release (one HTTPS GET to api.github.com, Windows' own WinHTTP,
-// no extra crates) about twice a day, and the flyout shows a warning dot on Settings when it's newer. "Download"
+// no extra crates) once when NF Switcher starts, and the flyout shows a warning dot on Settings when it's newer. "Download"
 // opens the release page in the user's browser *without* admin: NF Switcher runs elevated, so it asks Explorer's
 // desktop to open the link (Explorer runs as the normal user), instead of starting an elevated browser itself.
 use std::sync::Mutex;

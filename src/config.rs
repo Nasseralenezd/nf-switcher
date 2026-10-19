@@ -43,7 +43,7 @@ pub struct Settings {
     /// While apps are pinned, connect Wi-Fi again when Windows drops it (it does that to an idle Wi-Fi while
     /// Ethernet is plugged in: seen on this PC on 2026-10-18).
     pub reconnect_wifi: bool,
-    /// Ask GitHub for a newer release about twice a day.
+    /// Ask GitHub for a newer release once, when NF Switcher starts.
     pub check_updates: bool,
 }
 
