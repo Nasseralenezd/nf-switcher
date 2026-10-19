@@ -15,6 +15,17 @@ const ADD: f32 = 48.0;
 const FOOTER: f32 = 52.0;
 const SEARCH: f32 = 46.0;
 const RADIO: f32 = 44.0;
+/// The Add page's "Select all" row and its "Add N apps to Wi-Fi" bar.
+const SELECT_ALL: f32 = 36.0;
+const ADD_BAR: f32 = 50.0;
+
+/// A check box: ticked, partly (some of a list), or not.
+#[derive(Clone, Copy, PartialEq)]
+enum Check {
+    Off,
+    Part,
+    On,
+}
 
 pub mod glyph {
     pub const APP: u16 = 0xE8AB;
@@ -28,6 +39,8 @@ pub mod glyph {
     pub const WARNING: u16 = 0xE7BA;
     pub const INFO: u16 = 0xE946;
     pub const FOLDER: u16 = 0xE8B7;
+    pub const CHECK: u16 = 0xE73E;
+    pub const DASH: u16 = 0xE738;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +61,9 @@ pub enum Hit {
     Search,
     Pick(usize),
     PickExe,
+    /// "Select all" on the Add page, and its "Add N apps to Wi-Fi" button.
+    SelectAll,
+    AddSelected,
     WhenDown(bool),
     AdapterAuto,
     Adapter(usize),
@@ -97,6 +113,8 @@ pub struct PickItem {
     pub name: String,
     pub path: String,
     pub added: bool,
+    /// Ticked for "Add N apps to Wi-Fi".
+    pub selected: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -115,6 +133,8 @@ pub struct Model {
     pub banner: Option<Banner>,
     pub apps: Vec<AppItem>,
     pub picks: Vec<PickItem>,
+    /// The Add page's ticked programs (paths); kept while the search changes, cleared when the page opens.
+    pub selected: std::collections::BTreeSet<String>,
     pub running: usize,
     pub search: String,
     pub search_focus: bool,
@@ -150,6 +170,7 @@ impl Default for Model {
             banner: None,
             apps: Vec::new(),
             picks: Vec::new(),
+            selected: Default::default(),
             running: 0,
             search: String::new(),
             search_focus: false,
@@ -324,6 +345,20 @@ impl Ctx<'_> {
             }
         }
         self.hit(r, h);
+    }
+
+    /// A Windows-style check box: accent with a check mark (or a dash for "some"), else an outline.
+    fn check(&mut self, r: Rect, state: Check, h: Hit) {
+        let th = *self.th;
+        if let Some(p) = self.p {
+            if state == Check::Off {
+                p.stroke(r, 4.0, if self.hovered(h) { th.text } else { th.text2 }, 1.0);
+            } else {
+                p.fill(r, 4.0, if self.hovered(h) { th.accent_hover } else { th.accent });
+                let g = if state == Check::On { glyph::CHECK } else { glyph::DASH };
+                p.glyph(g, r, 12.0, th.on_accent);
+            }
+        }
     }
 
     fn toggle(&mut self, r: Rect, on: bool, h: Hit) {
@@ -543,9 +578,28 @@ fn add_page(c: &mut Ctx, max_h: f32) -> Frame {
     c.hit(field, Hit::Search);
     y += SEARCH;
 
+    // "Select all": the programs the search shows that aren't added yet.
+    let open = m.picks.iter().filter(|p| !p.added).count();
+    let ticked = m.picks.iter().filter(|p| !p.added && p.selected).count();
+    if open > 0 {
+        let row = Rect::new(8.0, y, WIDTH - 16.0, SELECT_ALL);
+        c.hover_bg(row, Hit::SelectAll);
+        c.hit(row, Hit::SelectAll);
+        if let Some(p) = c.p {
+            p.text("Select all", Rect::new(PAD, y, 200.0, SELECT_ALL), Font::Body, th.text, Align::Left);
+        }
+        let state = match ticked {
+            0 => Check::Off,
+            n if n == open => Check::On,
+            _ => Check::Part,
+        };
+        c.check(Rect::new(WIDTH - PAD - 28.0, y + 8.0, 20.0, 20.0), state, Hit::SelectAll);
+        y += SELECT_ALL;
+    }
+
     let rows = m.picks.len() + 1;
     let content = rows as f32 * ROW + 8.0;
-    let list_h = content.min((max_h - y - 6.0).max(ROW * 3.0));
+    let list_h = content.min((max_h - y - 6.0 - ADD_BAR).max(ROW * 3.0));
     let area = Rect::new(0.0, y, WIDTH, list_h);
     let first_hit = c.hits.len();
     c.list_begin(area);
@@ -568,14 +622,14 @@ fn add_page(c: &mut Ctx, max_h: f32) -> Frame {
                 if let Some(p) = c.p {
                     p.text(&it.name, Rect::new(tx, ry + 7.0, tw, 20.0), Font::Body, th.text, Align::Left);
                     p.text(&it.path, Rect::new(tx, ry + 27.0, tw, 18.0), Font::Mono, th.text3, Align::Left);
-                    let b = Rect::new(WIDTH - PAD - 60.0, ry + 12.0, 60.0, 28.0);
                     if it.added {
+                        let b = Rect::new(WIDTH - PAD - 60.0, ry + 12.0, 60.0, 28.0);
                         p.text("Added", b, Font::Caption, th.text3, Align::Center);
-                    } else {
-                        let hot = c.hovered(h);
-                        p.fill(b, 5.0, if hot { th.accent } else { th.button });
-                        p.text("Wi-Fi", b, Font::Body, if hot { th.on_accent } else { th.text }, Align::Center);
                     }
+                }
+                if !it.added {
+                    let state = if it.selected { Check::On } else { Check::Off };
+                    c.check(Rect::new(WIDTH - PAD - 28.0, ry + 16.0, 20.0, 20.0), state, h);
                 }
             } else {
                 c.hover_bg(row, Hit::PickExe);
@@ -595,6 +649,18 @@ fn add_page(c: &mut Ctx, max_h: f32) -> Frame {
     c.list_end();
     clip_list(&mut c.hits, first_hit, area);
     y += list_h + 6.0;
+
+    // The ticked programs (also ones the search hides now) go on Wi-Fi together.
+    let n = m.selected.len();
+    let b = Rect::new(PAD, y + 4.0, WIDTH - 2.0 * PAD, 36.0);
+    if n > 0 {
+        let label = if n == 1 { "Add 1 app to Wi-Fi".to_string() } else { format!("Add {n} apps to Wi-Fi") };
+        c.button(b, &label, None, Hit::AddSelected, true);
+    } else if let Some(p) = c.p {
+        p.fill(b, 5.0, th.button);
+        p.text("Tick the apps to add", b, Font::Body, th.text3, Align::Center);
+    }
+    y += ADD_BAR;
     Frame { height: y, hits: std::mem::take(&mut c.hits), list: Some((area, content)) }
 }
 

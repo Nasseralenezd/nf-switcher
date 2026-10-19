@@ -53,7 +53,7 @@ the wired connection to themselves.
     <td valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/images/add-dark.png">
-        <img src="docs/images/add-light.png" width="250" alt="Add an app: search running programs, or pick an .exe">
+        <img src="docs/images/add-light.png" width="250" alt="Add an app: search running programs, tick them or Select all, or pick an .exe">
       </picture>
     </td>
     <td valign="top">
@@ -99,7 +99,8 @@ updates in place and keeps your settings.
 ## How to use
 
 1. **Click the tray icon.** The flyout shows Ethernet and Wi-Fi with their addresses, and your apps.
-2. **Add an app.** Pick one of the running programs, or **Pick an .exe that isn't running…**
+2. **Add an app.** Tick the running programs you want (or **Select all**) and click **Add N apps to Wi-Fi**, or
+   **Pick an .exe that isn't running…**
 3. **Switch it on.** Its new connections go over Wi-Fi. Each app shows how many of its connections are on Wi-Fi.
 
 Good to know:

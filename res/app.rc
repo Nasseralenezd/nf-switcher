@@ -6,8 +6,8 @@
 1 24 "app.manifest"
 
 1 VERSIONINFO
-FILEVERSION 0,1,4,0
-PRODUCTVERSION 0,1,4,0
+FILEVERSION 0,1,5,0
+PRODUCTVERSION 0,1,5,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -17,11 +17,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "NF"
       VALUE "FileDescription", "NF Switcher"
-      VALUE "FileVersion", "0.1.4"
+      VALUE "FileVersion", "0.1.5"
       VALUE "InternalName", "nf-switcher"
       VALUE "OriginalFilename", "nf-switcher.exe"
       VALUE "ProductName", "NF Switcher"
-      VALUE "ProductVersion", "0.1.4"
+      VALUE "ProductVersion", "0.1.5"
     END
   END
   BLOCK "VarFileInfo"

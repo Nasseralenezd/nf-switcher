@@ -325,8 +325,15 @@ impl App {
     }
 
     pub fn add(&mut self, path: &str) {
-        let name = self.name(path);
-        self.cfg.set_route(path, &name, Route::Wifi);
+        self.add_all(&[path.to_string()]);
+    }
+
+    /// "Add N apps to Wi-Fi": all on Wi-Fi, saved and applied once.
+    pub fn add_all(&mut self, paths: &[String]) {
+        for path in paths {
+            let name = self.name(path);
+            self.cfg.set_route(path, &name, Route::Wifi);
+        }
         self.changed();
     }
 
@@ -702,9 +709,15 @@ impl App {
             .into_iter()
             .map(|(name, path)| {
                 let added = self.cfg.find(&path).is_some();
-                PickItem { name, path, added }
+                let selected = !added && m.selected.contains(&path);
+                PickItem { name, path, added, selected }
             })
             .collect();
+        // A ticked program that's on the list by now (added some other way) isn't added twice.
+        let gone: Vec<String> = m.selected.iter().filter(|p| self.cfg.find(p).is_some()).cloned().collect();
+        for p in gone {
+            m.selected.remove(&p);
+        }
     }
 }
 
@@ -925,6 +938,31 @@ mod tests {
         a.update_result(Ok(Some(rel(None))));
         a.fill(&mut m);
         assert_eq!(m.update_button.as_deref(), Some("Download"));
+    }
+
+    #[test]
+    fn ticked_apps_are_added_together_and_shown_ticked() {
+        let dir = std::env::temp_dir().join(format!("nfsw-app-{}", std::process::id()));
+        std::env::set_var("NFSW_DATA_DIR", &dir);
+        let (mut a, log) = app_with(vec![iface(Kind::Wifi, "{W}", 2, true, true, false)]);
+        let proc = |pid, path: &str| Proc { pid, ppid: 1, name: "x.exe".into(), path: Some(path.into()) };
+        a.procs = vec![proc(1, r"C:\B\brave.exe"), proc(2, r"C:\S\spotify.exe"), proc(3, r"C:\G\game.exe")];
+        let mut m = Model::default();
+        m.selected.insert(r"C:\S\spotify.exe".into());
+        a.fill(&mut m);
+        let ticked: Vec<bool> = m.picks.iter().map(|p| p.selected).collect();
+        assert_eq!(m.picks.len(), 3);
+        assert_eq!(ticked.iter().filter(|t| **t).count(), 1);
+
+        a.add_all(&[r"C:\B\brave.exe".into(), r"C:\S\spotify.exe".into()]);
+        assert_eq!(a.cfg.pinned().len(), 2);
+        assert_eq!(log.borrow().len(), 1, "both applied at once");
+        assert_eq!(log.borrow().last().unwrap().apps.len(), 2);
+        // Added ones show as added and drop out of the selection; the game is still free to tick.
+        a.fill(&mut m);
+        assert!(m.selected.is_empty());
+        assert_eq!(m.picks.iter().filter(|p| p.added).count(), 2);
+        assert!(m.picks.iter().any(|p| !p.added && p.path.ends_with("game.exe")));
     }
 
     #[test]

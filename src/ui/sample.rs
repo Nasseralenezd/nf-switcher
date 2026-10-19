@@ -141,15 +141,39 @@ pub fn insecure() -> Model {
 pub fn add_page() -> Model {
     let mut m = Model { page: Page::Add, running: 38, search: "ste".into(), search_focus: true, caret: true, ..Default::default() };
     m.picks = vec![
-        PickItem { name: "Steam".into(), path: r"C:\Program Files (x86)\Steam\steam.exe".into(), added: false },
+        PickItem { name: "Steam".into(), path: r"C:\Program Files (x86)\Steam\steam.exe".into(), added: false, selected: true },
         PickItem {
             name: "Steam Client WebHelper".into(),
             path: r"C:\Program Files (x86)\Steam\bin\cef\cef.win64\steamwebhelper.exe".into(),
             added: false,
+            selected: false,
         },
-        PickItem { name: "SteelSeries GG".into(), path: r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe".into(), added: true },
+        PickItem {
+            name: "SteelSeries GG".into(),
+            path: r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe".into(),
+            added: true,
+            selected: false,
+        },
     ];
-    m.hover = Some(Hit::Pick(0));
+    // One of the two shown is ticked (Select all shows a dash), plus one the search hides now.
+    m.selected = [r"C:\Program Files (x86)\Steam\steam.exe", r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    m.hover = Some(Hit::Pick(1));
+    m
+}
+
+/// "Select all" with nothing ticked yet.
+pub fn add_page_none() -> Model {
+    let mut m = add_page();
+    m.search.clear();
+    m.search_focus = false;
+    m.selected.clear();
+    for p in &mut m.picks {
+        p.selected = false;
+    }
+    m.hover = Some(Hit::SelectAll);
     m
 }
 
@@ -194,6 +218,7 @@ pub fn all() -> Vec<(&'static str, Model)> {
         ("too-old", too_old()),
         ("insecure", insecure()),
         ("add", add_page()),
+        ("add-none", add_page_none()),
         ("settings", settings_page()),
         ("settings-updating", settings_updating()),
     ]

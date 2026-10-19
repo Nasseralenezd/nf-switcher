@@ -584,6 +584,7 @@ impl Flyout {
         self.m.scroll = 0.0;
         self.m.hover = None;
         self.m.search_focus = p == Page::Add;
+        self.m.selected.clear();
         unsafe {
             if p == Page::Add {
                 self.m.search.clear();
@@ -613,8 +614,27 @@ impl Flyout {
             Hit::Back => self.set_page(Page::Main),
             Hit::Search => self.m.search_focus = true,
             Hit::Pick(i) => {
-                if let Some(p) = self.m.picks.get(i).map(|p| p.path.clone()) {
-                    self.app.add(&p);
+                // Ticks or unticks it; "Add N apps to Wi-Fi" adds the ticked ones.
+                if let Some(p) = self.m.picks.get(i).filter(|p| !p.added).map(|p| p.path.clone()) {
+                    if !self.m.selected.remove(&p) {
+                        self.m.selected.insert(p);
+                    }
+                }
+            }
+            Hit::SelectAll => {
+                let open: Vec<String> = self.m.picks.iter().filter(|p| !p.added).map(|p| p.path.clone()).collect();
+                if open.iter().all(|p| self.m.selected.contains(p)) {
+                    for p in &open {
+                        self.m.selected.remove(p);
+                    }
+                } else {
+                    self.m.selected.extend(open);
+                }
+            }
+            Hit::AddSelected => {
+                let paths: Vec<String> = std::mem::take(&mut self.m.selected).into_iter().collect();
+                if !paths.is_empty() {
+                    self.app.add_all(&paths);
                     self.set_page(Page::Main);
                 }
             }
@@ -688,9 +708,13 @@ impl Flyout {
                 self.refresh();
             }
             VK_RETURN if self.m.page == Page::Add => {
-                if let Some(i) = self.m.picks.iter().position(|p| !p.added) {
-                    let _ = self.click(Hit::Pick(i));
+                // Nothing ticked: search, then Enter adds the first match, as before.
+                if self.m.selected.is_empty() {
+                    if let Some(p) = self.m.picks.iter().find(|p| !p.added).map(|p| p.path.clone()) {
+                        self.m.selected.insert(p);
+                    }
                 }
+                let _ = self.click(Hit::AddSelected);
             }
             _ => return false,
         }
