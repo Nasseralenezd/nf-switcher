@@ -4,6 +4,8 @@
 //
 //   NF-Switcher-Setup.exe                 the options page; Install asks for admin (UAC) and carries on elevated
 //   uninstall.exe --uninstall [--quiet]   the uninstall page (Settings › Apps runs this); --quiet: no window
+//   ... --update                          NF Switcher's "Update now" (as admin): updates with the current choices,
+//                                         no options page, then starts the new NF Switcher and closes
 //   ... --sandbox DIR                     everything under DIR, no registry, no task, no Program Files (tests)
 use nf_switcher::installer::{self, Layout, Options};
 use nf_switcher::ui::paint::{base, Fonts, Painter};
@@ -41,6 +43,8 @@ struct Args {
     quiet: bool,
     /// Relaunched elevated: start the work at once.
     run: bool,
+    /// Started by NF Switcher's "Update now".
+    update: bool,
     dir: Option<PathBuf>,
     autostart: bool,
     desktop: bool,
@@ -60,6 +64,7 @@ fn parse_args() -> Args {
         uninstall: flag("--uninstall") || flag("--uninstall-now"),
         quiet: flag("--quiet"),
         run: flag("--install") || flag("--uninstall-now"),
+        update: flag("--update") && !flag("--uninstall") && !flag("--uninstall-now"),
         dir: val("--dir").map(PathBuf::from),
         autostart: val("--autostart").map(|v| v == "1").unwrap_or(true),
         desktop: val("--desktop").map(|v| v == "1").unwrap_or(false),
@@ -89,6 +94,8 @@ struct Setup {
     tracking: bool,
     installed_exe: Option<PathBuf>,
     auto: bool,
+    /// "Update now": start the new NF Switcher and close when done.
+    update: bool,
 }
 
 enum Effect {
@@ -357,6 +364,13 @@ impl Setup {
                     self.m.error = ERROR.lock().map(|s| s.clone()).unwrap_or_default();
                 }
                 self.refresh();
+                if self.update && wp.0 == 0 {
+                    // Back to where the user was: the new NF Switcher, as admin like this setup (no UAC prompt).
+                    if self.sandbox.is_none() {
+                        let _ = std::process::Command::new(self.layout.exe()).spawn();
+                    }
+                    unsafe { SetTimer(Some(self.hwnd), 1, 1500, None) };
+                }
                 if self.auto {
                     if let Some(root) = &self.sandbox {
                         let r = if wp.0 == 0 { "ok".to_string() } else { format!("failed: {}", self.m.error) };
@@ -366,7 +380,7 @@ impl Setup {
                 }
                 done
             }
-            WM_TIMER if self.auto => (Some(LRESULT(0)), Effect::Close),
+            WM_TIMER if self.auto || self.update => (Some(LRESULT(0)), Effect::Close),
             WM_CLOSE if self.m.page == Page::Working => done, // not in the middle of it
             WM_DESTROY => {
                 unsafe { PostQuitMessage(0) };
@@ -530,7 +544,13 @@ fn main() {
         let Ok(hwnd) = CreateWindowExW(
             WS_EX_APPWINDOW,
             CLASS,
-            &HSTRING::from(if a.uninstall { "Uninstall NF Switcher" } else { "NF Switcher Setup" }),
+            &HSTRING::from(if a.uninstall {
+                "Uninstall NF Switcher"
+            } else if a.update {
+                "Updating NF Switcher"
+            } else {
+                "NF Switcher Setup"
+            }),
             WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
             0,
             0,
@@ -567,6 +587,7 @@ fn main() {
             tracking: false,
             installed_exe: None,
             auto: a.auto,
+            update: false,
         };
         SETUP.with(|c| *c.borrow_mut() = Some(setup));
         with(|s| {
@@ -581,7 +602,10 @@ fn main() {
             let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER);
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
-            if a.run && (admin || a.sandbox.is_some()) {
+            // An update keeps the current folder, "Start with Windows" and desktop shortcut (read above). Without
+            // admin it's the normal options page instead, whose Update button asks for it.
+            if (a.run || a.update) && (admin || a.sandbox.is_some()) {
+                s.update = a.update;
                 s.start_work();
             }
         });

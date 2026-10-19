@@ -127,8 +127,16 @@ Good to know:
 NF Switcher looks for a new release once, 20 seconds after it starts (with Start with Windows, that's once per
 sign-in): one HTTPS request to GitHub's API. It doesn't check again while it keeps running; switching **Check for
 updates** off and on checks right away. When a new version is out, the Settings gear gets a dot and Settings shows
-**New update** with a **Download** button, which opens the release page in your browser. Run the new setup and it
-updates in place.
+**New update** with an **Update now** button:
+
+1. NF Switcher downloads the new setup from the release (no browser), showing its progress on the card.
+2. It checks the file's size and SHA-256 against what GitHub lists for it, and keeps it in its own admin-only folder,
+   locked, so nothing can swap it before it runs. A file that doesn't match is never used.
+3. The setup updates NF Switcher in place with your current choices (no options, no UAC prompt, because NF Switcher
+   already runs as admin), then opens the new version. Pinned apps use Ethernet for those few seconds.
+
+Without admin, or if the download fails, the button is **Download** instead: it opens the release page in your
+browser, and the setup you download there updates in place too.
 
 ## Uninstall
 
@@ -288,6 +296,8 @@ cargo test
   `SMOKE {...}` line and renders the real flyout to PNG.
 - `nf-switcher.exe --shots DIR`: the flyout's and the installer's sample states as PNG, dark and light, offscreen.
 - `nf-switcher.exe --uitest`: shows the real flyout for about 12 seconds, clicks through it and measures memory.
+- `nf-switcher.exe --check-update [--download DIR]`: the update check, printed. With `--download` it also downloads
+  the latest release's setup into DIR and checks it as **Update now** does, but never runs it.
 - `nf-switcher.exe --selftest` (admin): pins throwaway copies of `probe.exe` and checks with real TCP and UDP traffic
   that routing, the Ethernet network, blocking and cleanup all work. Report in
   `%ProgramData%\NF Switcher\selftest\report.txt`.

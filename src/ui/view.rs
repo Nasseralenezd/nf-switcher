@@ -130,6 +130,10 @@ pub struct Model {
     /// A newer version on GitHub ("0.2.0"): the gear gets a warning dot, Settings a "New update" card.
     pub update: Option<String>,
     pub update_note: String,
+    /// The card's second line, its button ("Update now", "Download", none while it runs) and progress bar.
+    pub update_sub: String,
+    pub update_button: Option<String>,
+    pub update_progress: Option<f32>,
     pub about: Vec<String>,
     pub hover: Option<Hit>,
     pub pressed: Option<Hit>,
@@ -160,6 +164,9 @@ impl Default for Model {
             autostart: true,
             update: None,
             update_note: String::new(),
+            update_sub: String::new(),
+            update_button: None,
+            update_progress: None,
             about: Vec::new(),
             hover: None,
             pressed: None,
@@ -613,17 +620,26 @@ fn settings_page(c: &mut Ctx, max_h: f32) -> Frame {
         c.toggle(Rect::new(WIDTH - PAD - 40.0, y + 12.0, 40.0, 20.0), on, h);
     };
     if let Some(v) = &m.update {
-        // The "New update" card, first on the page.
+        // The "New update" card, first on the page: "Update now" (or "Download"), then its progress.
         let r = Rect::new(PAD, y + 4.0, WIDTH - 2.0 * PAD, 62.0);
+        let bw = m.update_button.as_ref().map(|l| c.fonts.measure(l, Font::Body) + 28.0).unwrap_or(0.0);
         if let Some(p) = c.p {
             p.fill(r, 6.0, th.warn_bg);
             p.stroke(r, 6.0, th.tile_line, 1.0);
             p.glyph(glyph::WARNING, Rect::new(r.x + 10.0, r.y + 10.0, 20.0, 20.0), 15.0, th.warn);
             p.text("New update", Rect::new(r.x + 38.0, r.y + 8.0, 180.0, 22.0), Font::BodyStrong, th.text, Align::Left);
-            p.text(&format!("NF Switcher {v} is out"), Rect::new(r.x + 38.0, r.y + 30.0, 200.0, 20.0), Font::Caption, th.text2, Align::Left);
+            let sub = if m.update_sub.is_empty() { format!("NF Switcher {v} is out") } else { m.update_sub.clone() };
+            let sub_w = r.w - 38.0 - if bw > 0.0 { bw + 24.0 } else { 12.0 };
+            p.text(&sub, Rect::new(r.x + 38.0, r.y + 30.0, sub_w, 20.0), Font::Caption, th.text2, Align::Left);
+            if let Some(f) = m.update_progress {
+                let bar = Rect::new(r.x + 38.0, r.bottom() - 9.0, r.w - 50.0, 3.0);
+                p.fill(bar, 1.5, th.tile_line);
+                p.fill(Rect::new(bar.x, bar.y, bar.w * f.clamp(0.0, 1.0), bar.h), 1.5, th.accent);
+            }
         }
-        let b = Rect::new(r.right() - 108.0, r.y + 15.0, 96.0, 32.0);
-        c.button(b, "Download", None, Hit::UpdateDownload, true);
+        if let Some(label) = &m.update_button {
+            c.button(Rect::new(r.right() - 12.0 - bw, r.y + 15.0, bw, 32.0), label, None, Hit::UpdateDownload, true);
+        }
         y += 74.0;
     }
     c.section(y, "When Wi-Fi is down", "");

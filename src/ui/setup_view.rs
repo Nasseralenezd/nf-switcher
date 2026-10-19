@@ -218,14 +218,21 @@ pub fn render(p: Option<&Painter>, th: &Theme, m: &Model, fonts: &Fonts) -> Fram
             y + 30.0
         }
         Page::Working => {
-            let title = if m.uninstalling { "Removing…" } else { "Installing…" };
+            let title = if m.uninstalling {
+                "Removing…"
+            } else if m.installed.is_some() {
+                "Updating…"
+            } else {
+                "Installing…"
+            };
             c.hero(0xE8AB, brand, title, &version);
             let frac = (m.step as f32 + 0.5) / m.steps.len().max(1) as f32;
             c.progress(90.0, frac);
             c.steps(106.0, false) + 22.0
         }
         Page::Done => {
-            c.hero(0xE73E, hex(0x0f7b0f), "NF Switcher is installed", "Find it in the tray next to the clock");
+            let title = if m.installed.is_some() { "NF Switcher is updated" } else { "NF Switcher is installed" };
+            c.hero(0xE73E, hex(0x0f7b0f), title, "Find it in the tray next to the clock");
             c.close_x();
             c.progress(90.0, 1.0);
             let mut y = c.steps(106.0, true) + 14.0;

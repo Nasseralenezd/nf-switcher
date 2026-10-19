@@ -8,7 +8,7 @@ use super::icons::IconCache;
 use super::paint::{base, Fonts, Painter};
 use super::theme::Theme;
 use super::view::{render, Frame, Hit, Model, Page, WIDTH};
-use crate::app::App;
+use crate::app::{App, Updating};
 use crate::elevate;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -34,6 +34,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_NETCHANGE: u32 = WM_APP + 2;
 const WM_UPDATE: u32 = WM_APP + 3;
+/// "Update now": the download moved on / finished (posted by its thread).
+const WM_UPDATE_PROGRESS: u32 = WM_APP + 4;
+const WM_UPDATE_READY: u32 = WM_APP + 5;
 const T_NET: usize = 1;
 const T_ACTIVITY: usize = 2;
 const T_CARET: usize = 3;
@@ -44,6 +47,8 @@ const T_FOCUS: usize = 7;
 const T_VERSIONS: usize = 8;
 const T_TRAY: usize = 9;
 const T_UPDATE: usize = 10;
+/// "Update now": the setup should have closed this copy by now; if not, it failed (and says so itself).
+const T_INSTALLING: usize = 11;
 /// The update check: once, 20 s after start (the network may not be up yet at sign-in).
 const UPDATE_FIRST_MS: u32 = 20_000;
 const TRAY_ID: u32 = 1;
@@ -488,6 +493,17 @@ impl Flyout {
         Effect::None
     }
 
+    /// "Update now": downloads and checks the setup in the background (WM_UPDATE_PROGRESS, then WM_UPDATE_READY).
+    fn start_update(&mut self, rel: crate::update::Release) {
+        crate::app::log(&format!("updating to {}", rel.tag));
+        self.app.updating = Updating::Downloading(0);
+        let hwnd = self.hwnd.0 as usize;
+        let post = move |msg: u32| unsafe {
+            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), msg, WPARAM(0), LPARAM(0));
+        };
+        crate::update::download_async(rel, move || post(WM_UPDATE_PROGRESS), move || post(WM_UPDATE_READY));
+    }
+
     /// Starts a background check; its result arrives as WM_UPDATE.
     fn check_updates(&self) {
         if !self.app.cfg.settings.check_updates || self.test.is_some() {
@@ -625,9 +641,15 @@ impl Flyout {
                 }
             }
             Hit::UpdateDownload => {
-                if let Some(u) = &self.app.update {
-                    return Effect::OpenUrl(u.url.clone());
+                let Some(rel) = self.app.update.clone() else { return Effect::None };
+                if self.app.update_busy() {
+                    return Effect::None;
                 }
+                // Without admin, without a checkable setup, or after a failed try: the release page instead.
+                if self.app.updating == Updating::Failed || !self.app.can_self_update() {
+                    return Effect::OpenUrl(rel.url);
+                }
+                self.start_update(rel);
             }
             Hit::Adapter(i) => {
                 if let Some((guid, _)) = self.app.adapter_choices().get(i).cloned() {
@@ -803,7 +825,21 @@ impl Flyout {
                         unsafe {
                             let _ = KillTimer(Some(self.hwnd), T_UPDATE);
                         }
+                        // The setup an earlier "Update now" downloaded has finished by now.
+                        if !self.app.read_only() && !self.app.update_busy() {
+                            crate::update::clean_downloads();
+                        }
                         self.check_updates();
+                    }
+                    T_INSTALLING => {
+                        unsafe {
+                            let _ = KillTimer(Some(self.hwnd), T_INSTALLING);
+                        }
+                        if self.app.updating == Updating::Installing {
+                            crate::app::log("update: the setup didn't finish");
+                            self.app.updating = Updating::Failed;
+                            self.refresh();
+                        }
                     }
                     T_TRAY => {
                         unsafe {
@@ -848,6 +884,31 @@ impl Flyout {
                 }
                 done
             }
+            WM_UPDATE_PROGRESS => {
+                if let Updating::Downloading(_) = self.app.updating {
+                    self.app.updating = Updating::Downloading(crate::update::download_percent());
+                    self.refresh();
+                }
+                done
+            }
+            WM_UPDATE_READY => {
+                if let Some(r) = crate::update::take_download() {
+                    // A checked setup: start it; it closes this copy, updates and starts the new one.
+                    match r.and_then(crate::update::run_setup) {
+                        Ok(()) => {
+                            crate::app::log("update: the setup is running");
+                            self.app.updating = Updating::Installing;
+                            unsafe { SetTimer(Some(self.hwnd), T_INSTALLING, 60_000, None) };
+                        }
+                        Err(e) => {
+                            crate::app::log(&format!("update failed: {e}"));
+                            self.app.updating = Updating::Failed;
+                        }
+                    }
+                    self.refresh();
+                }
+                done
+            }
             WM_NETCHANGE => {
                 // Windows sends bursts of changes; wait until it settles.
                 unsafe { SetTimer(Some(self.hwnd), T_NET, 400, None) };
@@ -880,7 +941,7 @@ impl Flyout {
                     // Log-off or shutdown: take everything out of Windows now, there's no later.
                     self.app.shutdown();
                     self.tray_remove();
-                    for t in [T_NET, T_ACTIVITY, T_RESYNC, T_VERSIONS, T_FOCUS, T_CARET, T_TRAY, T_UPDATE] {
+                    for t in [T_NET, T_ACTIVITY, T_RESYNC, T_VERSIONS, T_FOCUS, T_CARET, T_TRAY, T_UPDATE, T_INSTALLING] {
                         unsafe {
                             let _ = KillTimer(Some(self.hwnd), t);
                         }

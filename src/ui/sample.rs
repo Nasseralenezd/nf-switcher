@@ -170,6 +170,18 @@ pub fn settings_page() -> Model {
     m.hover = Some(Hit::WhenDown(true));
     m.update = Some("0.2.0".into());
     m.update_note = "Checked at 21:30: version 0.2.0 is out".into();
+    m.update_sub = "NF Switcher 0.2.0 is out".into();
+    m.update_button = Some("Update now".into());
+    m
+}
+
+/// "Update now" while it downloads.
+pub fn settings_updating() -> Model {
+    let mut m = settings_page();
+    m.update_sub = "Downloading… 45%".into();
+    m.update_button = None;
+    m.update_progress = Some(0.45);
+    m.hover = None;
     m
 }
 
@@ -183,5 +195,6 @@ pub fn all() -> Vec<(&'static str, Model)> {
         ("insecure", insecure()),
         ("add", add_page()),
         ("settings", settings_page()),
+        ("settings-updating", settings_updating()),
     ]
 }

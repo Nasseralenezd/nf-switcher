@@ -128,11 +128,19 @@ fn main() {
         std::process::exit(smoke());
     }
     if has(&args, "--check-update") {
-        // The same request the background check makes, printed (read-only; for testing a release).
+        // The same request the background check makes, printed (read-only; for testing a release). With
+        // --download DIR it also downloads that release's setup into DIR and checks it, as "Update now" does,
+        // but never starts it.
         let r = nf_switcher::update::latest();
         let current = nf_switcher::update::current();
+        let dir = args.iter().position(|a| a == "--download").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from);
         let out = match &r {
-            Ok(Some(rel)) => serde_json::json!({"current": current, "latest": rel.tag, "url": rel.url, "newer": rel.version > current}),
+            Ok(Some(rel)) if dir.is_some() => {
+                let d = nf_switcher::update::download(rel, dir.as_deref().unwrap_or(std::path::Path::new(".")), &mut |_| {});
+                serde_json::json!({"current": current, "latest": rel.tag, "setup": rel.setup.as_ref().map(|s| &s.url),
+                    "download": match &d { Ok(c) => format!("ok, SHA-256 matched: {}", c.path.display()), Err(e) => format!("failed: {e}") }})
+            }
+            Ok(Some(rel)) => serde_json::json!({"current": current, "latest": rel.tag, "url": rel.url, "newer": rel.version > current, "setup": rel.setup.is_some()}),
             Ok(None) => serde_json::json!({"current": current, "latest": null}),
             Err(e) => serde_json::json!({"current": current, "error": e}),
         };

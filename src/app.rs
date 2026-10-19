@@ -27,6 +27,10 @@ pub struct App {
     /// A newer release on GitHub, and what the last check said (for Settings).
     pub update: Option<crate::update::Release>,
     pub update_note: String,
+    /// "Update now": where it's at.
+    pub updating: Updating,
+    /// This is the installed copy (it runs from the install folder), so an update can replace it.
+    pub installed_copy: bool,
     /// "Start with Windows": the sign-in task exists (read once at start, then kept up to date here).
     pub autostart: bool,
     pub error: Option<EngineError>,
@@ -37,6 +41,29 @@ pub struct App {
     pub socks: Vec<Sock>,
     names: HashMap<String, String>,
     own_exe: String,
+}
+
+/// The one-click update, as Settings' "New update" card shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Updating {
+    No,
+    /// Downloading the setup, 0-100 %.
+    Downloading(u32),
+    /// The checked setup is running; it closes this copy and starts the new one.
+    Installing,
+    /// The download or the check failed (the reason went to the log); "Download" opens the page instead.
+    Failed,
+}
+
+/// Is this exe the installed NF Switcher (in the folder Settings › Apps' entry names)? A copy run from somewhere
+/// else isn't updated in place: the setup would install a second one.
+fn installed_copy() -> bool {
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).ok();
+    let Some((dir, _)) = crate::installer::installed() else { return false };
+    match (std::env::current_exe().ok().and_then(|e| canon(&e)), canon(&dir)) {
+        (Some(exe), Some(dir)) => exe.starts_with(dir),
+        _ => false,
+    }
 }
 
 /// The local time as HH:MM (for "checked at").
@@ -120,6 +147,8 @@ impl App {
             last_reconnect: None,
             update: None,
             update_note: String::new(),
+            updating: Updating::No,
+            installed_copy: installed_copy(),
             autostart: crate::autostart::exists(),
             error,
             applied: Applied::default(),
@@ -174,10 +203,13 @@ impl App {
     pub fn update_result(&mut self, r: Result<Option<crate::update::Release>, String>) {
         let now = clock();
         match r {
+            // A running update keeps the release it's installing.
+            _ if self.update_busy() => {}
             Ok(Some(rel)) if rel.version > crate::update::current() => {
                 log(&format!("update available: {}", rel.tag));
                 self.update_note = format!("Checked at {now}: version {} is out", rel.version_text());
                 self.update = Some(rel);
+                self.updating = Updating::No;
             }
             Ok(_) => {
                 self.update = None;
@@ -189,11 +221,22 @@ impl App {
 
     pub fn set_check_updates(&mut self, on: bool) {
         self.cfg.settings.check_updates = on;
-        if !on {
+        if !on && !self.update_busy() {
             self.update = None;
             self.update_note.clear();
         }
         self.changed();
+    }
+
+    /// "Update now" can download and install the update here: with admin and a secured settings folder (the setup
+    /// then runs without a prompt, and the download goes where only admins can write), from the installed copy,
+    /// and with a setup GitHub lists a SHA-256 for. Otherwise "Download" opens the release page.
+    pub fn can_self_update(&self) -> bool {
+        !self.read_only() && self.installed_copy && self.update.as_ref().is_some_and(|r| r.setup.is_some())
+    }
+
+    pub fn update_busy(&self) -> bool {
+        matches!(self.updating, Updating::Downloading(_) | Updating::Installing)
     }
 
     /// Creates or removes the sign-in task that starts NF Switcher in the tray (needs admin).
@@ -597,6 +640,14 @@ impl App {
         m.autostart = self.autostart;
         m.update = self.update.as_ref().map(|r| r.version_text());
         m.update_note = self.update_note.clone();
+        let out = format!("NF Switcher {} is out", m.update.clone().unwrap_or_default());
+        (m.update_sub, m.update_button, m.update_progress) = match self.updating {
+            Updating::No if self.can_self_update() => (out, Some("Update now".into()), None),
+            Updating::No => (out, Some("Download".into()), None),
+            Updating::Downloading(p) => (format!("Downloading… {p}%"), None, Some(p as f32 / 100.0)),
+            Updating::Installing => ("Installing… NF Switcher restarts".into(), None, Some(1.0)),
+            Updating::Failed => ("Couldn't update here".into(), Some("Download".into()), None),
+        };
         m.adapters = self.adapter_choices().into_iter().map(|(_, it)| it).collect();
         m.about = vec![
             format!("NF Switcher {}", env!("CARGO_PKG_VERSION")),
@@ -688,6 +739,8 @@ mod tests {
             last_reconnect: None,
             update: None,
             update_note: String::new(),
+            updating: Updating::No,
+            installed_copy: true,
             autostart: false,
             error: None,
             applied: Applied::default(),
@@ -842,6 +895,36 @@ mod tests {
         a.fill(&mut m);
         assert_eq!(m.status, "Error");
         assert!(m.banner.is_some_and(|b| b.text.contains("admin-only")));
+    }
+
+    #[test]
+    fn the_update_card_offers_update_now_with_admin_and_a_checked_setup() {
+        let (mut a, _) = app_with(vec![]);
+        let url = format!("https://github.com/{}/releases/tag/v9.0.0", crate::update::REPO);
+        let rel = |setup| crate::update::Release { version: (9, 0, 0), tag: "v9.0.0".into(), url: url.clone(), setup };
+        let setup = crate::update::Setup { url: "https://github.com/x".into(), size: 1, sha256: "0".repeat(64) };
+        a.update_result(Ok(Some(rel(Some(setup)))));
+        let mut m = Model::default();
+        a.fill(&mut m);
+        assert_eq!((m.update.as_deref(), m.update_button.as_deref()), (Some("9.0.0"), Some("Update now")));
+        a.updating = Updating::Downloading(45);
+        a.fill(&mut m);
+        assert_eq!((m.update_sub.as_str(), m.update_button.is_none(), m.update_progress), ("Downloading… 45%", true, Some(0.45)));
+        // A check that comes in meanwhile doesn't take the release away.
+        a.update_result(Ok(None));
+        assert!(a.update.is_some());
+        a.updating = Updating::Failed;
+        a.fill(&mut m);
+        assert_eq!((m.update_sub.as_str(), m.update_button.as_deref()), ("Couldn't update here", Some("Download")));
+        // Without admin, or without a setup to check: the release page.
+        a.updating = Updating::No;
+        a.admin = false;
+        a.fill(&mut m);
+        assert_eq!(m.update_button.as_deref(), Some("Download"));
+        a.admin = true;
+        a.update_result(Ok(Some(rel(None))));
+        a.fill(&mut m);
+        assert_eq!(m.update_button.as_deref(), Some("Download"));
     }
 
     #[test]
