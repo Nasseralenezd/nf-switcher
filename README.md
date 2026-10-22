@@ -110,7 +110,7 @@ Good to know:
 - **Revert all** puts every app back on the default route and removes everything NF Switcher added to Windows.
   Your list stays, so switching an app back on is one click.
 - **Quit** (right-click the tray icon) does the same for Windows but keeps your choices for next time.
-- Right-click an app to remove it from the list.
+- Click the **×** at the start of an app's row (or right-click the app) to remove it from the list.
 
 ## Settings
 

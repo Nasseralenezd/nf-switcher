@@ -608,6 +608,10 @@ impl Flyout {
                 self.app.toggle(i);
                 self.app.refresh_activity();
             }
+            Hit::Remove(i) => {
+                self.app.remove(i);
+                self.m.hover = None;
+            }
             Hit::AddApp => self.set_page(Page::Add),
             Hit::Revert => self.app.revert_all(),
             Hit::Gear => self.set_page(Page::Settings),
@@ -799,7 +803,7 @@ impl Flyout {
             WM_RBUTTONUP => {
                 let (x, y) = self.dip(lp);
                 match self.frame.hit(x, y) {
-                    Some(Hit::AppRow(i)) | Some(Hit::Toggle(i)) => (Some(LRESULT(0)), Effect::RowMenu(i, self.screen_point(lp))),
+                    Some(Hit::AppRow(i) | Hit::Toggle(i) | Hit::Remove(i)) => (Some(LRESULT(0)), Effect::RowMenu(i, self.screen_point(lp))),
                     _ => done,
                 }
             }

@@ -41,6 +41,7 @@ pub mod glyph {
     pub const FOLDER: u16 = 0xE8B7;
     pub const CHECK: u16 = 0xE73E;
     pub const DASH: u16 = 0xE738;
+    pub const CLOSE: u16 = 0xE711;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +55,8 @@ pub enum Page {
 pub enum Hit {
     Toggle(usize),
     AppRow(usize),
+    /// The × at the start of an app's row: takes it off the list.
+    Remove(usize),
     AddApp,
     Revert,
     Gear,
@@ -347,6 +350,21 @@ impl Ctx<'_> {
         self.hit(r, h);
     }
 
+    /// A small × button; red when hovered, since it removes something.
+    fn remove_x(&mut self, r: Rect, h: Hit) {
+        let th = *self.th;
+        self.hit(r, h);
+        if let Some(p) = self.p {
+            let hot = self.hovered(h);
+            if self.pressed(h) {
+                p.fill(r, 4.0, th.press);
+            } else if hot {
+                p.fill(r, 4.0, th.hover);
+            }
+            p.glyph(glyph::CLOSE, r, 10.0, if hot { th.err } else { th.text3 });
+        }
+    }
+
     /// A Windows-style check box: accent with a check mark (or a dash for "some"), else an outline.
     fn check(&mut self, r: Rect, state: Check, h: Hit) {
         let th = *self.th;
@@ -516,9 +534,11 @@ fn main_page(c: &mut Ctx, max_h: f32) -> Frame {
             let row = Rect::new(8.0, ry, WIDTH - 16.0, ROW);
             c.hover_bg(row, Hit::AppRow(i));
             c.hit(row, Hit::AppRow(i));
-            c.icon(Rect::new(PAD, ry + 11.0, 30.0, 30.0), &a.path, &a.name);
+            // Added after the row, so a click on it removes the app instead of switching it.
+            c.remove_x(Rect::new(10.0, ry + 14.0, 24.0, 24.0), Hit::Remove(i));
+            c.icon(Rect::new(PAD + 22.0, ry + 11.0, 30.0, 30.0), &a.path, &a.name);
             if let Some(p) = c.p {
-                let tx = PAD + 42.0;
+                let tx = PAD + 64.0;
                 let tw = WIDTH - tx - PAD - 52.0;
                 p.text(&a.name, Rect::new(tx, ry + 7.0, tw, 20.0), Font::Body, th.text, Align::Left);
                 let sc = if a.warn { th.warn } else { th.text3 };
@@ -811,5 +831,24 @@ pub fn paragraph_height(fonts: &Fonts, s: &str, f: Font, w: f32) -> f32 {
         let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
         let mut m = DWRITE_TEXT_METRICS::default();
         if layout.GetMetrics(&mut m).is_ok() { m.height.ceil() } else { 18.0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_app_row_has_an_x_that_removes_it() {
+        let fonts = Fonts::new().unwrap();
+        let m = super::super::sample::main_page();
+        let f = render(None, &Theme::dark(false), &m, &fonts, &NoIcons, 640.0);
+        let xs: Vec<Rect> = f.hits.iter().filter(|(_, h)| matches!(h, Hit::Remove(_))).map(|(r, _)| *r).collect();
+        assert_eq!(xs.len(), m.apps.len());
+        let (x, y) = (xs[0].x + xs[0].w / 2.0, xs[0].y + xs[0].h / 2.0);
+        assert_eq!(f.hit(x, y), Some(Hit::Remove(0)));
+        // The rest of the row still switches the app; the switch itself too.
+        assert_eq!(f.hit(200.0, y), Some(Hit::AppRow(0)));
+        assert_eq!(f.hit(WIDTH - PAD - 20.0, y), Some(Hit::Toggle(0)));
     }
 }

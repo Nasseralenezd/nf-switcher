@@ -71,6 +71,13 @@ pub fn hero() -> Model {
     m
 }
 
+/// The main page with the pointer on an app's × (it turns red).
+pub fn remove_hover() -> Model {
+    let mut m = main_page();
+    m.hover = Some(Hit::Remove(2));
+    m
+}
+
 pub fn wifi_down() -> Model {
     let mut m = main_page();
     m.status = "Wi-Fi down".into();
@@ -213,6 +220,7 @@ pub fn all() -> Vec<(&'static str, Model)> {
     vec![
         ("main", main_page()),
         ("hero", hero()),
+        ("main-remove", remove_hover()),
         ("wifi-down", wifi_down()),
         ("needs-admin", needs_admin()),
         ("too-old", too_old()),
